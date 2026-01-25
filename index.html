@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma OTT</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        window.storage = {
+            async get(key) {
+                const value = localStorage.getItem(key);
+                return value ? { value } : null;
+            },
+            async set(key, value) {
+                localStorage.setItem(key, value);
+                return { key, value };
+            },
+            async delete(key) {
+                localStorage.removeItem(key);
+                return { key, deleted: true };
+            }
+        };
+
+        const OTTPlatform = () => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [showPassword, setShowPassword] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [message, setMessage] = useState({ type: '', text: '' });
+            
+            const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+            const [registerForm, setRegisterForm] = useState({
+                name: '', email: '', password: '', confirmPassword: ''
+            });
+
+            useEffect(() => {
+                loadCurrentUser();
+            }, []);
+
+            const loadCurrentUser = async () => {
+                try {
+                    const session = await window.storage.get('ott_current_session');
+                    if (session) {
+                        const sessionData = JSON.parse(session.value);
+                        const user = await window.storage.get(`ott_user_${sessionData.userId}`);
+                        if (user) {
+                            setCurrentUser(JSON.parse(user.value));
+                        }
+                    }
+                } catch (error) {
+                    console.log('No hay sesión activa');
+                }
+            };
+
+            const handleRegister = async () => {
+                setMessage({ type: '', text: '' });
+
+                if (!registerForm.name || !registerForm.email || !registerForm.password || !registerForm.confirmPassword) {
+                    setMessage({ type: 'error', text: 'Todos los campos son obligatorios' });
+                    return;
+                }
+
+                if (registerForm.password !== registerForm.confirmPassword) {
+                    setMessage({ type: 'error', text: 'Las contraseñas no coinciden' });
+                    return;
+                }
+
+                if (registerForm.password.length < 6) {
+                    setMessage({ type: 'error', text: 'La contraseña debe tener al menos 6 caracteres' });
+                    return;
+                }
+
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(registerForm.email)) {
+                    setMessage({ type: 'error', text: 'Email inválido' });
+                    return;
+                }
+
+                try {
+                    const existingUser = await window.storage.get(`ott_email_${registerForm.email}`);
+                    if (existingUser) {
+                        setMessage({ type: 'error', text: 'Este email ya está registrado' });
+                        return;
+                    }
+
+                    const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    const newUser = {
+                        id: userId,
+                        name: registerForm.name,
+                        email: registerForm.email,
+                        password: registerForm.password,
+                        createdAt: new Date().toISOString(),
+                        subscription: 'basic'
+                    };
+
+                    await window.storage.set(`ott_user_${userId}`, JSON.stringify(newUser));
+                    await window.storage.set(`ott_email_${registerForm.email}`, userId);
+
+                    setMessage({ type: 'success', text: '¡Registro exitoso! Ya puedes iniciar sesión' });
+                    setRegisterForm({ name: '', email: '', password: '', confirmPassword: '' });
+                    
+                    setTimeout(() => {
+                        setIsLogin(true);
+                        setMessage({ type: '', text: '' });
+                    }, 2000);
+
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Error al registrar usuario' });
+                }
+            };
+
+            const handleLogin = async () => {
+                setMessage({ type: '', text: '' });
+
+                if (!loginForm.email || !loginForm.password) {
+                    setMessage({ type: 'error', text: 'Email y contraseña son obligatorios' });
+                    return;
+                }
+
+                try {
+                    const userIdResult = await window.storage.get(`ott_email_${loginForm.email}`);
+                    
+                    if (!userIdResult) {
+                        setMessage({ type: 'error', text: 'Usuario no encontrado' });
+                        return;
+                    }
+
+                    const userId = userIdResult.value;
+                    const userResult = await window.storage.get(`ott_user_${userId}`);
+                    
+                    if (!userResult) {
+                        setMessage({ type: 'error', text: 'Error al cargar usuario' });
+                        return;
+                    }
+
+                    const user = JSON.parse(userResult.value);
+
+                    if (user.password !== loginForm.password) {
+                        setMessage({ type: 'error', text: 'Contraseña incorrecta' });
+                        return;
+                    }
+
+                    const session = {
+                        userId: user.id,
+                        loginTime: new Date().toISOString()
+                    };
+
+                    await window.storage.set('ott_current_session', JSON.stringify(session));
+                    setCurrentUser(user);
+                    setMessage({ type: 'success', text: `¡Bienvenido ${user.name}!` });
+                    setLoginForm({ email: '', password: '' });
+
+                } catch (error) {
+                    setMessage({ type: 'error', text: 'Error al iniciar sesión' });
+                }
+            };
+
+            const handleLogout = async () => {
+                try {
+                    await window.storage.delete('ott_current_session');
+                    setCurrentUser(null);
+                    setMessage({ type: 'success', text: 'Sesión cerrada exitosamente' });
+                    setTimeout(() => setMessage({ type: '', text: '' }), 2000);
+                } catch (error) {
+                    console.error('Error al cerrar sesión:', error);
+                }
+            };
+
+            if (currentUser) {
+                return React.createElement('div', {
+                    className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4'
+                }, React.createElement('div', {
+                    className: 'bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-4xl border border-purple-500/20'
+                }, 
+                    React.createElement('div', { className: 'flex items-center justify-between mb-8 flex-wrap gap-4' },
+                        React.createElement('h1', { className: 'text-3xl font-bold text-white' }, '🎬 Mi Plataforma OTT'),
+                        React.createElement('button', {
+                            onClick: handleLogout,
+                            className: 'px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all'
+                        }, 'Cerrar Sesión')
+                    ),
+                    React.createElement('div', { className: 'bg-gray-700/30 rounded-xl p-6 mb-6' },
+                        React.createElement('h2', { className: 'text-2xl font-semibold text-white mb-4' }, 
+                            `¡Bienvenido, ${currentUser.name}! 👋`
+                        ),
+                        React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300' },
+                            React.createElement('p', {}, `📧 Email: ${currentUser.email}`),
+                            React.createElement('p', {}, `💎 Plan: ${currentUser.subscription.toUpperCase()}`),
+                            React.createElement('p', {}, `✅ Estado: Activo`),
+                            React.createElement('p', {}, `📅 Miembro desde: ${new Date(currentUser.createdAt).toLocaleDateString()}`)
+                        )
+                    ),
+                    React.createElement('div', { className: 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl p-6 border border-purple-500/30' },
+                        React.createElement('h3', { className: 'text-xl font-semibold text-white mb-3' }, 'Contenido Disponible'),
+                        React.createElement('p', { className: 'text-gray-300 mb-4' }, 'Explora todo el contenido de streaming disponible.'),
+                        React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-3' },
+                            ['🎬 Películas', '📺 Series', '🎥 Documentales', '📡 En Vivo'].map(cat =>
+                                React.createElement('div', {
+                                    key: cat,
+                                    className: 'bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer'
+                                }, React.createElement('p', { className: 'text-white font-medium text-sm md:text-base' }, cat))
+                            )
+                        )
+                    )
+                ));
+            }
+
+            return React.createElement('div', {
+                className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4'
+            }, React.createElement('div', {
+                className: 'bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-purple-500/20'
+            },
+                React.createElement('div', { className: 'text-center mb-8' },
+                    React.createElement('div', { className: 'text-6xl mb-4' }, '🎬'),
+                    React.createElement('h1', { className: 'text-4xl font-bold text-white mb-2' }, 'Plataforma OTT'),
+                    React.createElement('p', { className: 'text-gray-400' }, 'Tu contenido favorito en un solo lugar')
+                ),
+                message.text && React.createElement('div', {
+                    className: `flex items-center gap-2 p-4 rounded-lg mb-6 ${message.type === 'error' ? 'bg-red-500/20 border border-red-500/50' : 'bg-green-500/20 border border-green-500/50'}`
+                }, 
+                    React.createElement('span', { className: 'text-2xl' }, message.type === 'error' ? '⚠️' : '✅'),
+                    React.createElement('span', {
+                        className: message.type === 'error' ? 'text-red-300' : 'text-green-300'
+                    }, message.text)
+                ),
+                React.createElement('div', { className: 'flex gap-2 mb-6 bg-gray-700/30 p-1 rounded-lg' },
+                    React.createElement('button', {
+                        onClick: () => { setIsLogin(true); setMessage({ type: '', text: '' }); },
+                        className: `flex-1 py-2 px-4 rounded-md transition-all ${isLogin ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' : 'text-gray-400 hover:text-white'}`
+                    }, 'Iniciar Sesión'),
+                    React.createElement('button', {
+                        onClick: () => { setIsLogin(false); setMessage({ type: '', text: '' }); },
+                        className: `flex-1 py-2 px-4 rounded-md transition-all ${!isLogin ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' : 'text-gray-400 hover:text-white'}`
+                    }, 'Registrarse')
+                ),
+                isLogin ? 
+                    React.createElement('div', { className: 'space-y-4' },
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '📧 Email'),
+                            React.createElement('input', {
+                                type: 'email',
+                                value: loginForm.email,
+                                onChange: (e) => setLoginForm({...loginForm, email: e.target.value}),
+                                placeholder: 'tu@email.com',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '🔒 Contraseña'),
+                            React.createElement('input', {
+                                type: showPassword ? 'text' : 'password',
+                                value: loginForm.password,
+                                onChange: (e) => setLoginForm({...loginForm, password: e.target.value}),
+                                placeholder: '••••••••',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('button', {
+                            onClick: () => setShowPassword(!showPassword),
+                            className: 'text-sm text-purple-400 hover:text-purple-300'
+                        }, showPassword ? '🙈 Ocultar contraseña' : '👁️ Mostrar contraseña'),
+                        React.createElement('button', {
+                            onClick: handleLogin,
+                            className: 'w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105'
+                        }, 'Iniciar Sesión')
+                    )
+                :
+                    React.createElement('div', { className: 'space-y-4' },
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '👤 Nombre Completo'),
+                            React.createElement('input', {
+                                type: 'text',
+                                value: registerForm.name,
+                                onChange: (e) => setRegisterForm({...registerForm, name: e.target.value}),
+                                placeholder: 'Juan Pérez',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '📧 Email'),
+                            React.createElement('input', {
+                                type: 'email',
+                                value: registerForm.email,
+                                onChange: (e) => setRegisterForm({...registerForm, email: e.target.value}),
+                                placeholder: 'tu@email.com',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '🔒 Contraseña (mín. 6 caracteres)'),
+                            React.createElement('input', {
+                                type: showPassword ? 'text' : 'password',
+                                value: registerForm.password,
+                                onChange: (e) => setRegisterForm({...registerForm, password: e.target.value}),
+                                placeholder: '••••••••',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('div', {},
+                            React.createElement('label', { className: 'block text-gray-300 mb-2 text-sm' }, '🔒 Confirmar Contraseña'),
+                            React.createElement('input', {
+                                type: showPassword ? 'text' : 'password',
+                                value: registerForm.confirmPassword,
+                                onChange: (e) => setRegisterForm({...registerForm, confirmPassword: e.target.value}),
+                                placeholder: '••••••••',
+                                className: 'w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all'
+                            })
+                        ),
+                        React.createElement('button', {
+                            onClick: () => setShowPassword(!showPassword),
+                            className: 'text-sm text-purple-400 hover:text-purple-300'
+                        }, showPassword ? '🙈 Ocultar contraseña' : '👁️ Mostrar contraseña'),
+                        React.createElement('button', {
+                            onClick: handleRegister,
+                            className: 'w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105'
+                        }, 'Crear Cuenta')
+                    )
+            ));
+        };
+
+        ReactDOM.render(React.createElement(OTTPlatform), document.getElementById('root'));
+    </script>
+</body>
+</html>
