@@ -275,12 +275,26 @@
                             <div class="bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl p-6 border border-purple-500/30">
                                 <h3 class="text-xl font-semibold text-white mb-3">Contenido Disponible</h3>
                                 <p class="text-gray-300 mb-4">Explora todo el contenido de streaming disponible.</p>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    ${['🎬 Películas', '📺 Series', '🎥 Documentales', '📡 En Vivo'].map(cat => `
-                                        <div class="bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer">
-                                            <p class="text-white font-medium text-sm md:text-base">${cat}</p>
-                                        </div>
+                                <div id="video-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    ${[1, 2, 3, 4, 5, 6].map(num => `
+                                        <button class="video-btn bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer" data-video="${num}">
+                                            <p class="text-white font-medium text-sm md:text-base">🎬 Video ${num}</p>
+                                        </button>
                                     `).join('')}
+                                </div>
+                                <div id="video-player" style="display: none;" class="mt-6">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h4 class="text-lg font-semibold text-white" id="video-title"></h4>
+                                        <button id="close-video" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
+                                            Cerrar
+                                        </button>
+                                    </div>
+                                    <div class="relative" style="padding-bottom: 56.25%; height: 0;">
+                                        <iframe id="youtube-iframe" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" 
+                                            frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                            allowfullscreen>
+                                        </iframe>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -288,6 +302,40 @@
                 `;
 
                 document.getElementById('btn-logout').addEventListener('click', handleLogout);
+                
+                // Videos de YouTube (puedes cambiar estos IDs por los videos que quieras)
+                const videoLinks = {
+                    1: 'dQw4w9WgXcQ',  // Cambia este ID por el video que quieras
+                    2: 'jNQXAC9IVRw',  // Cambia este ID por el video que quieras
+                    3: 'kJQP7kiw5Fk',  // Cambia este ID por el video que quieras
+                    4: '9bZkp7q19f0',  // Cambia este ID por el video que quieras
+                    5: 'hY7m5jjJ9mM',  // Cambia este ID por el video que quieras
+                    6: 'L_jWHffIx5E'   // Cambia este ID por el video que quieras
+                };
+
+                document.querySelectorAll('.video-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const videoNum = btn.dataset.video;
+                        const videoId = videoLinks[videoNum];
+                        const videoPlayer = document.getElementById('video-player');
+                        const iframe = document.getElementById('youtube-iframe');
+                        const videoTitle = document.getElementById('video-title');
+                        
+                        iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+                        videoTitle.textContent = `Video ${videoNum}`;
+                        videoPlayer.style.display = 'block';
+                        
+                        // Scroll al reproductor
+                        videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    });
+                });
+
+                document.getElementById('close-video').addEventListener('click', () => {
+                    const videoPlayer = document.getElementById('video-player');
+                    const iframe = document.getElementById('youtube-iframe');
+                    iframe.src = '';
+                    videoPlayer.style.display = 'none';
+                });
                 
             } catch (error) {
                 console.error('Error al cargar datos:', error);
