@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plataforma OTT - Firebase</title>
+    <title>Mi Plataforma OTT</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="module">
+        // Importar módulos de Firebase
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -24,12 +25,14 @@
             appId: "1:623885901425:web:d3fa5079d942eb064a05d0"
         };
 
+        // Inicializar Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
         let currentUser = null;
 
+        // Función para mostrar mensajes de éxito o error
         function showMessage(type, text) {
             const messageDiv = document.getElementById('message');
             if (!messageDiv) return;
@@ -48,6 +51,7 @@
             }
         }
 
+        // Función para manejar el registro de usuarios
         async function handleRegister() {
             const name = document.getElementById('reg-name').value.trim();
             const email = document.getElementById('reg-email').value.trim();
@@ -106,6 +110,7 @@
             }
         }
 
+        // Función para manejar el inicio de sesión
         async function handleLogin() {
             const email = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-password').value;
@@ -137,6 +142,7 @@
             }
         }
 
+        // Función para manejar el cierre de sesión
         async function handleLogout() {
             try {
                 await signOut(auth);
@@ -147,13 +153,50 @@
             }
         }
 
+        // Función para cambiar a la vista de inicio de sesión
+        function switchToLogin() {
+            document.getElementById('login-form').style.display = 'block';
+            document.getElementById('register-form').style.display = 'none';
+            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+
+            const messageDiv = document.getElementById('message');
+            if (messageDiv) messageDiv.style.display = 'none';
+        }
+
+        // Función para cambiar a la vista de registro
+        function switchToRegister() {
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('register-form').style.display = 'block';
+            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+
+            const messageDiv = document.getElementById('message');
+            if (messageDiv) messageDiv.style.display = 'none';
+        }
+
+        // Función para reproducir un video
+        function playVideo(url, title, description) {
+            const player = document.getElementById('video-player');
+            const frame = document.getElementById('video-frame');
+            const videoTitle = document.getElementById('video-title');
+            const videoDescription = document.getElementById('video-description');
+
+            frame.src = url;
+            videoTitle.textContent = title;
+            videoDescription.textContent = description;
+
+            player.classList.remove('hidden');
+        }
+
+        // Función para renderizar la página de inicio de sesión/registro
         function renderLoginPage() {
             document.getElementById('root').innerHTML = `
                 <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
                     <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-purple-500/20">
                         <div class="text-center mb-8">
                             <div class="text-6xl mb-4">🎬</div>
-                            <h1 class="text-4xl font-bold text-white mb-2">Plataforma OTT</h1>
+                            <h1 class="text-4xl font-bold text-white mb-2">Mi Plataforma OTT</h1>
                             <p class="text-gray-400">Con Firebase Database 🔥</p>
                         </div>
 
@@ -223,39 +266,7 @@
             document.getElementById('btn-register').addEventListener('click', handleRegister);
         }
 
-        function switchToLogin() {
-            document.getElementById('login-form').style.display = 'block';
-            document.getElementById('register-form').style.display = 'none';
-            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-
-            const messageDiv = document.getElementById('message');
-            if (messageDiv) messageDiv.style.display = 'none';
-        }
-
-        function switchToRegister() {
-            document.getElementById('login-form').style.display = 'none';
-            document.getElementById('register-form').style.display = 'block';
-            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-
-            const messageDiv = document.getElementById('message');
-            if (messageDiv) messageDiv.style.display = 'none';
-        }
-
-        function playVideo(url, title, description) {
-            const player = document.getElementById('video-player');
-            const frame = document.getElementById('video-frame');
-            const videoTitle = document.getElementById('video-title');
-            const videoDescription = document.getElementById('video-description');
-
-            frame.src = url;
-            videoTitle.textContent = title;
-            videoDescription.textContent = description;
-
-            player.classList.remove('hidden');
-        }
-
+        // Función para renderizar el dashboard con el menú de videos
         async function renderDashboard(user) {
             try {
                 const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -268,8 +279,11 @@
                 document.getElementById('root').innerHTML = `
                     <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
                         <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-4xl border border-purple-500/20">
-                            <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
-                                <h1 class="text-3xl font-bold text-white">🎬 Mi Plataforma OTT</h1>
+                            <div class="flex items-center justify-between mb-6">
+                                <div class="flex items-center gap-3">
+                                    <div class="text-3xl">📺</div>
+                                    <h1 class="text-2xl font-bold text-white">Mi Plataforma OTT</h1>
+                                </div>
                                 <button id="btn-logout" class="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
                                     Cerrar Sesión
                                 </button>
@@ -278,17 +292,44 @@
                             <div id="message" style="display: none;"></div>
 
                             <div class="bg-gray-700/30 rounded-xl p-6 mb-6">
-                                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData.name}! 👋</h2>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300">
+                                <h2 class="text-xl font-semibold text-white mb-2">¡Bienvenido, ${userData.name}! 👋</h2>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-gray-300">
                                     <p>📧 Email: ${userData.email}</p>
                                     <p>💎 Plan: ${userData.subscription.toUpperCase()}</p>
                                     <p>✅ Estado: Activo</p>
                                     <p>📅 Miembro desde: ${new Date(userData.createdAt).toLocaleDateString()}</p>
+                                    <p>🔥 Base de datos: Firebase Firestore</p>
+                                    <p>🔒 Seguridad: Activada</p>
+                                </div>
+                            </div>
+
+                            <!-- Contenido Disponible -->
+                            <div class="bg-gray-700/30 rounded-xl p-6">
+                                <h3 class="text-xl font-semibold text-white mb-4">Contenido Disponible</h3>
+                                <p class="text-gray-300 mb-4">Explora todo el contenido de streaming disponible.</p>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    <div class="bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer">
+                                        <div class="text-2xl mb-2">🎬</div>
+                                        <p class="text-white font-medium">Películas</p>
+                                    </div>
+                                    <div class="bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer">
+                                        <div class="text-2xl mb-2">📺</div>
+                                        <p class="text-white font-medium">Series</p>
+                                    </div>
+                                    <div class="bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer">
+                                        <div class="text-2xl mb-2">🎥</div>
+                                        <p class="text-white font-medium">Documentales</p>
+                                    </div>
+                                    <div class="bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer">
+                                        <div class="text-2xl mb-2">📡</div>
+                                        <p class="text-white font-medium">En Vivo</p>
+                                    </div>
                                 </div>
                             </div>
 
                             <!-- Menú de Videos -->
-                            <div class="bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-xl p-6 border border-purple-500/30">
+                            ${videos.length > 0 ? `
+                            <div class="bg-gray-700/30 rounded-xl p-6 mt-6">
                                 <h3 class="text-xl font-semibold text-white mb-4">🎬 Catálogo de Videos</h3>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     ${videos.map(video => `
@@ -305,6 +346,11 @@
                                     `).join('')}
                                 </div>
                             </div>
+                            ` : `
+                            <div class="bg-yellow-500/20 rounded-xl p-6 mt-6 border border-yellow-500/50">
+                                <p class="text-yellow-300">No hay videos disponibles. Por favor, agrega videos a la colección "videos" en Firestore.</p>
+                            </div>
+                            `}
 
                             <!-- Reproductor de Video -->
                             <div id="video-player" class="mt-6 rounded-xl overflow-hidden bg-gray-700/50 hidden">
@@ -334,26 +380,63 @@
             }
         }
 
-        // Función para poblar Firestore con videos de ejemplo (ejecutar una vez)
+        // Función para agregar videos de ejemplo a Firestore
         async function addSampleVideos() {
             const videos = [
-                { title: "Película 1", description: "Una emocionante aventura", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "Películas", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
-                { title: "Serie 1", description: "Capítulo piloto de la serie", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "Series", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
-                { title: "Documental 1", description: "Documental sobre la naturaleza", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "Documentales", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
-                { title: "Película 2", description: "Comedia familiar", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "Películas", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
-                { title: "Serie 2", description: "Segunda temporada, episodio 1", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "Series", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
-                { title: "En Vivo", description: "Transmisión en vivo", url: "https://www.youtube.com/embed/dQw4w9WgXcQ", category: "En Vivo", thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg" },
+                {
+                    title: "Película de Ejemplo 1",
+                    description: "Una película emocionante sobre aventuras.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "Películas",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                },
+                {
+                    title: "Serie de Ejemplo 1",
+                    description: "Capítulo piloto de una serie dramática.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "Series",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                },
+                {
+                    title: "Documental de Ejemplo 1",
+                    description: "Un documental fascinante sobre la naturaleza.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "Documentales",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                },
+                {
+                    title: "Transmisión en Vivo",
+                    description: "Evento en vivo exclusivo para miembros.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "En Vivo",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                },
+                {
+                    title: "Película de Ejemplo 2",
+                    description: "Una comedia familiar para todas las edades.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "Películas",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                },
+                {
+                    title: "Serie de Ejemplo 2",
+                    description: "Segunda temporada de la serie más vista.",
+                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    category: "Series",
+                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                }
             ];
 
             for (const video of videos) {
-                await setDoc(doc(db, 'videos', video.title.toLowerCase().replace(' ', '-')), video);
+                await setDoc(doc(db, 'videos', video.title.toLowerCase().replace(/ /g, '-')), video);
             }
-            console.log('Videos de ejemplo añadidos');
+            console.log('Videos de ejemplo añadidos correctamente.');
         }
 
-        // Descomenta la siguiente línea para poblar Firestore con videos de ejemplo (solo una vez)
+        // Descomenta la siguiente línea para agregar los videos de ejemplo (solo una vez)
         // addSampleVideos();
 
+        // Escuchar cambios en el estado de autenticación
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
@@ -364,6 +447,7 @@
             }
         });
 
+        // Hacer que las funciones estén disponibles globalmente
         window.showMessage = showMessage;
         window.playVideo = playVideo;
     </script>
