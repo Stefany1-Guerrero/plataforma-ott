@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plataforma OTT - Firebase</title>
+    <title>Mi Plataforma OTT</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="module">
+        // Importar módulos de Firebase
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -24,12 +25,14 @@
             appId: "1:623885901425:web:d3fa5079d942eb064a05d0"
         };
 
+        // Inicializar Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
         let currentUser = null;
 
+        // Función para mostrar mensajes de éxito o error
         function showMessage(type, text) {
             const messageDiv = document.getElementById('message');
             if (!messageDiv) return;
@@ -48,6 +51,7 @@
             }
         }
 
+        // Función para manejar el registro de usuarios
         async function handleRegister() {
             const name = document.getElementById('reg-name').value.trim();
             const email = document.getElementById('reg-email').value.trim();
@@ -106,6 +110,7 @@
             }
         }
 
+        // Función para manejar el inicio de sesión
         async function handleLogin() {
             const email = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-password').value;
@@ -137,6 +142,7 @@
             }
         }
 
+        // Función para manejar el cierre de sesión
         async function handleLogout() {
             try {
                 await signOut(auth);
@@ -147,13 +153,50 @@
             }
         }
 
+        // Función para cambiar a la vista de inicio de sesión
+        function switchToLogin() {
+            document.getElementById('login-form').style.display = 'block';
+            document.getElementById('register-form').style.display = 'none';
+            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+
+            const messageDiv = document.getElementById('message');
+            if (messageDiv) messageDiv.style.display = 'none';
+        }
+
+        // Función para cambiar a la vista de registro
+        function switchToRegister() {
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('register-form').style.display = 'block';
+            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+
+            const messageDiv = document.getElementById('message');
+            if (messageDiv) messageDiv.style.display = 'none';
+        }
+
+        // Función para reproducir un video
+        function playVideo(url, title, description) {
+            const player = document.getElementById('video-player');
+            const frame = document.getElementById('video-frame');
+            const videoTitle = document.getElementById('video-title');
+            const videoDescription = document.getElementById('video-description');
+
+            frame.src = url;
+            videoTitle.textContent = title;
+            videoDescription.textContent = description;
+
+            player.classList.remove('hidden');
+        }
+
+        // Función para renderizar la página de inicio de sesión/registro
         function renderLoginPage() {
             document.getElementById('root').innerHTML = `
                 <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
                     <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-purple-500/20">
                         <div class="text-center mb-8">
                             <div class="text-6xl mb-4">🎬</div>
-                            <h1 class="text-4xl font-bold text-white mb-2">Plataforma OTT</h1>
+                            <h1 class="text-4xl font-bold text-white mb-2">Mi Plataforma OTT</h1>
                             <p class="text-gray-400">Con Firebase Database 🔥</p>
                         </div>
 
@@ -223,39 +266,7 @@
             document.getElementById('btn-register').addEventListener('click', handleRegister);
         }
 
-        function switchToLogin() {
-            document.getElementById('login-form').style.display = 'block';
-            document.getElementById('register-form').style.display = 'none';
-            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-
-            const messageDiv = document.getElementById('message');
-            if (messageDiv) messageDiv.style.display = 'none';
-        }
-
-        function switchToRegister() {
-            document.getElementById('login-form').style.display = 'none';
-            document.getElementById('register-form').style.display = 'block';
-            document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-            document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-
-            const messageDiv = document.getElementById('message');
-            if (messageDiv) messageDiv.style.display = 'none';
-        }
-
-        function playVideo(url, title, description) {
-            const player = document.getElementById('video-player');
-            const frame = document.getElementById('video-frame');
-            const videoTitle = document.getElementById('video-title');
-            const videoDescription = document.getElementById('video-description');
-
-            frame.src = url;
-            videoTitle.textContent = title;
-            videoDescription.textContent = description;
-
-            player.classList.remove('hidden');
-        }
-
+        // Función para renderizar el dashboard con el menú de videos
         async function renderDashboard(user) {
             try {
                 const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -302,15 +313,15 @@
                                 </div>
                             </div>
 
-                            <!-- Menú de Videos Ampliado -->
+                            <!-- Menú de Videos -->
                             <div class="bg-gray-700/30 rounded-xl p-6 mt-6 border border-purple-500/30">
                                 <h3 class="text-xl font-semibold text-white mb-4">🎬 Catálogo de Videos</h3>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    ${videos.length > 0 ? videos.map(video => `
+                                    ${videos.length > 0 ? videos.map((video, index) => `
                                         <div class="bg-gray-700/50 rounded-lg overflow-hidden hover:bg-gray-600/50 transition-all cursor-pointer"
                                              onclick="playVideo('${video.url}', '${video.title}', '${video.description}')">
                                             <div class="h-40 bg-gray-600 flex items-center justify-center">
-                                                ${video.thumbnail ? `<img src="${video.thumbnail}" alt="${video.title}" class="h-full w-full object-cover">` : '<span class="text-gray-400">Miniatura no disponible</span>'}
+                                                <span class="text-white text-2xl font-bold">${video.title}</span>
                                             </div>
                                             <div class="p-4">
                                                 <h4 class="text-white font-medium">${video.title}</h4>
@@ -319,7 +330,7 @@
                                         </div>
                                     `).join('') : `
                                     <div class="col-span-full bg-yellow-500/20 p-4 rounded-lg text-yellow-300 text-center">
-                                        No hay videos disponibles. Agrega videos a la colección "videos" en Firestore.
+                                        No hay videos disponibles. Agrega videos a Firestore.
                                     </div>
                                     `}
                                 </div>
@@ -357,58 +368,45 @@
         async function addSampleVideos() {
             const videos = [
                 {
-                    title: "Película 1: Aventura en la Selva",
-                    description: "Una emocionante aventura en la selva amazónica.",
+                    title: "Video 1",
+                    description: "Descripción del Video 1.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Películas",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "Películas"
                 },
                 {
-                    title: "Serie 1: Misterios Urbanos",
-                    description: "Capítulo 1 de la serie de misterio más vista.",
+                    title: "Video 2",
+                    description: "Descripción del Video 2.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Series",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "Series"
                 },
                 {
-                    title: "Documental: Vida Salvaje",
-                    description: "Explora la vida salvaje en África.",
+                    title: "Video 3",
+                    description: "Descripción del Video 3.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Documentales",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "Documentales"
                 },
                 {
-                    title: "Película 2: El Secreto del Tesoro",
-                    description: "Una película sobre la búsqueda de un tesoro perdido.",
+                    title: "Video 4",
+                    description: "Descripción del Video 4.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Películas",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "Películas"
                 },
                 {
-                    title: "Serie 2: Ciencia y Tecnología",
-                    description: "Descubre los avances tecnológicos del futuro.",
+                    title: "Video 5",
+                    description: "Descripción del Video 5.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Series",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "En Vivo"
                 },
                 {
-                    title: "En Vivo: Concierto 2026",
-                    description: "Transmisión en vivo del concierto del año.",
+                    title: "Video 6",
+                    description: "Descripción del Video 6.",
                     url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "En Vivo",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
-                },
-                {
-                    title: "Película 3: Viaje a Marte",
-                    description: "La primera misión tripulada a Marte.",
-                    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    category: "Películas",
-                    thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg"
+                    category: "Series"
                 }
             ];
 
             for (const video of videos) {
-                await setDoc(doc(db, 'videos', video.title.toLowerCase().replace(/ /g, '-')), video);
+                await setDoc(doc(db, 'videos', `video-${videos.indexOf(video) + 1}`), video);
             }
             console.log('6 videos de ejemplo añadidos correctamente.');
         }
@@ -416,6 +414,7 @@
         // Descomenta la siguiente línea para agregar los videos de ejemplo (solo una vez)
         // addSampleVideos();
 
+        // Escuchar cambios en el estado de autenticación
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
@@ -426,6 +425,7 @@
             }
         });
 
+        // Hacer que las funciones estén disponibles globalmente
         window.showMessage = showMessage;
         window.playVideo = playVideo;
     </script>
