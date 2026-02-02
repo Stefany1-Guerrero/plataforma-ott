@@ -10,6 +10,16 @@
     <div id="root"></div>
 
     <script type="module">
+        let currentUser = null;
+        const CONTENT_URL = 'https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json';
+        let contentCache = null;
+        async function loadContent() {
+          if (contentCache) return contentCache;
+          const res = await fetch(CONTENT_URL, { cache: 'no-store' });
+          if (!res.ok) throw new Error('No se pudo cargar content.json');
+          contentCache = await res.json();
+          return contentCache;
+        }
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, doc, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -302,16 +312,26 @@
                 `;
 
                 document.getElementById('btn-logout').addEventListener('click', handleLogout);
-                
+
+                const data = await loadContent();
+
+                // mapa para usar igual que antes
+                const videoLinks = {};
+                const videoTitles = {};
+                data.videos.forEach(v => {
+                  videoLinks[String(v.id)] = v.youtubeId;
+                  videoTitles[String(v.id)] = v.title || `Video ${v.id}`;
+                });
+
                 // Videos de YouTube (puedes cambiar estos IDs por los videos que quieras)
-                const videoLinks = {
-                    1: 'yprOJ97cp8k',  // Cambia este ID por el video que quieras
-                    2: 'e2XK5-eZ09k',  // Cambia este ID por el video que quieras
-                    3: 'Cp8BgKtb24g',  // Cambia este ID por el video que quieras
-                    4: 'aTTZJDoAnYs',  // Cambia este ID por el video que quieras
-                    5: 'ioLSrkXXT9E',  // Cambia este ID por el video que quieras
-                    6: 'TDZK5rVnUH0'   // Cambia este ID por el video que quieras
-                };
+                //const videoLinks = {
+                  //  1: 'yprOJ97cp8k',  // Cambia este ID por el video que quieras
+                //    2: 'e2XK5-eZ09k',  // Cambia este ID por el video que quieras
+                //    3: 'Cp8BgKtb24g',  // Cambia este ID por el video que quieras
+                //    4: 'aTTZJDoAnYs',  // Cambia este ID por el video que quieras
+                //    5: 'ioLSrkXXT9E',  // Cambia este ID por el video que quieras
+                //    6: 'TDZK5rVnUH0'   // Cambia este ID por el video que quieras
+                //};
 
                 document.querySelectorAll('.video-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -322,7 +342,7 @@
                         const videoTitle = document.getElementById('video-title');
                         
                         iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-                        videoTitle.textContent = `Video ${videoNum}`;
+                        videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
                         videoPlayer.style.display = 'block';
                         
                         // Scroll al reproductor
