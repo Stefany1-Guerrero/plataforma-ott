@@ -444,7 +444,7 @@
                 //};
 
                 document.querySelectorAll('.video-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
+                    btn.addEventListener('click', async () => {
                         const videoNum = btn.dataset.video;
                         const videoId = videoLinks[videoNum];
                         const videoPlayer = document.getElementById('video-player');
