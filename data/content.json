@@ -94,53 +94,53 @@
         }
       ]
     },
+   {
+  "id": 3,
+  "title": "Ajuste de regiones al 50%",
+  "youtubeId": "Cp8BgKtb24g",
+  "questions": [
     {
-      "id": 3,
-      "title": "Ajuste de regiones al 50%",
-      "youtubeId": "Cp8BgKtb24g",
-      "questions": [
-        {
-          "id": "v3q1",
-          "time": 24,
-          "question": "¿Qué porcentaje de la pantalla se configura para la región de video en el centro según el tutorial?",
-          "options": ["25%", "75%", "50%", "100%"],
-          "correctIndex": 2,
-          "explanation": "El tutorial muestra cómo configurar la región de video al 50% en el centro de la pantalla."
-        },
-        {
-          "id": "v3q2",
-          "time": 155,
-          "question": "Si la región de video ocupa el 50% en el centro de la pantalla, ¿qué porcentaje de margen debe quedar a cada lado (izquierda y derecha)?",
-          "options": ["50% en cada lado", "25% en cada lado", "10% en cada lado", "30% en cada lado"],
-          "correctIndex": 1,
-          "explanation": "Al establecer un 50% en el centro, se requiere un 25% a cada lado (izquierda y derecha) para lograr el equilibrio."
-        },
-        {
-          "id": "v3q3",
-          "time": 50,
-          "question": "¿Cuál es el propósito principal de ajustar el tamaño de la región de video al 50% en el tutorial?",
-          "options": ["Ahorrar recursos del sistema", "Mejorar la experiencia del usuario y facilitar la visualización del contenido", "Reducir el tiempo de carga", "Aumentar la resolución del video"],
-          "correctIndex": 1,
-          "explanation": "El ajuste al 50% busca mejorar la experiencia del usuario durante la demostración del curso."
-        },
-        {
-          "id": "v3q4",
-          "time": 165,
-          "question": "¿Qué aspecto es crucial según el video para lograr una distribución equitativa en la pantalla?",
-          "options": ["El color de fondo", "La configuración de posiciones y proporciones", "La velocidad del emulador", "El formato del archivo de video"],
-          "correctIndex": 1,
-          "explanation": "La configuración de posiciones es crucial para lograr una distribución equitativa y un equilibrio adecuado."
-        },
-        {
-          "id": "v3q5",
-          "time": 185,
-          "question": "Además de los márgenes laterales, ¿qué otros elementos menciona el video que también afectan la presentación general?",
-          "options": ["Los colores de la interfaz", "Los topes superior e inferior", "El tipo de fuente utilizada", "La velocidad de reproducción"],
-          "correctIndex": 1,
-          "explanation": "Los topes superior e inferior también afectan la presentación general y deben ajustarse para una visualización óptima."
-        }
-      ]
+      "id": "v3q1",
+      "time": 24,
+      "question": "¿Qué porcentaje de la pantalla se configura para la región de video en el centro según el tutorial?",
+      "options": ["25%", "75%", "50%", "100%"],
+      "correctIndex": 2,
+      "explanation": "El tutorial muestra cómo configurar la región de video al 50% en el centro de la pantalla."
     },
+    {
+      "id": "v3q2",
+      "time": 44,
+      "question": "¿Cuál es el propósito principal de ajustar el tamaño de la región de video al 50% en el tutorial?",
+      "options": ["Ahorrar recursos del sistema", "Mejorar la experiencia del usuario y facilitar la visualización del contenido", "Reducir el tiempo de carga", "Aumentar la resolución del video"],
+      "correctIndex": 1,
+      "explanation": "El ajuste al 50% busca mejorar la experiencia del usuario durante la demostración del curso."
+    },
+    {
+      "id": "v3q3",
+      "time": 90,
+      "question": "Si la región de video ocupa el 50% en el centro de la pantalla, ¿qué porcentaje de margen debe quedar a cada lado (izquierda y derecha)?",
+      "options": ["50% en cada lado", "25% en cada lado", "10% en cada lado", "30% en cada lado"],
+      "correctIndex": 1,
+      "explanation": "Al establecer un 50% en el centro, se requiere un 25% a cada lado (izquierda y derecha) para lograr el equilibrio."
+    },
+    {
+      "id": "v3q4",
+      "time": 155,
+      "question": "¿Qué aspecto es crucial según el video para lograr una distribución equitativa en la pantalla?",
+      "options": ["El color de fondo", "La configuración de posiciones y proporciones", "La velocidad del emulador", "El formato del archivo de video"],
+      "correctIndex": 1,
+      "explanation": "La configuración de posiciones es crucial para lograr una distribución equitativa y un equilibrio adecuado."
+    },
+    {
+      "id": "v3q5",
+      "time": 175,
+      "question": "Además de los márgenes laterales, ¿qué otros elementos menciona el video que también afectan la presentación general?",
+      "options": ["Los colores de la interfaz", "Los topes superior e inferior", "El tipo de fuente utilizada", "La velocidad de reproducción"],
+      "correctIndex": 1,
+      "explanation": "Los topes superior e inferior también afectan la presentación general y deben ajustarse para una visualización óptima."
+    }
+  ]
+},
     {
       "id": 4,
       "title": "Regiones madre e hijas con transparencia",
