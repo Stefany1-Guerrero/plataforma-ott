@@ -125,7 +125,7 @@
         },
         {
           "id": "v3q4",
-          "time": 155,
+          "time": 165,
           "question": "¿Qué aspecto es crucial según el video para lograr una distribución equitativa en la pantalla?",
           "options": ["El color de fondo", "La configuración de posiciones y proporciones", "La velocidad del emulador", "El formato del archivo de video"],
           "correctIndex": 1,
@@ -133,7 +133,7 @@
         },
         {
           "id": "v3q5",
-          "time": 175,
+          "time": 185,
           "question": "Además de los márgenes laterales, ¿qué otros elementos menciona el video que también afectan la presentación general?",
           "options": ["Los colores de la interfaz", "Los topes superior e inferior", "El tipo de fuente utilizada", "La velocidad de reproducción"],
           "correctIndex": 1,
