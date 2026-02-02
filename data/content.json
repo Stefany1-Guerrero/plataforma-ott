@@ -2,73 +2,285 @@
   "videos": [
     {
       "id": 1,
-      "title": "Video 1",
+      "title": "Instalación del entorno de trabajo",
       "youtubeId": "yprOJ97cp8k",
       "questions": [
         {
           "id": "v1q1",
-          "time": 15,
-          "question": "Pregunta 1 del video 1",
-          "options": ["A", "B", "C", "D"],
+          "time": 25,
+          "question": "¿Cuál es el entorno de desarrollo principal que se utiliza para crear aplicaciones interactivas en televisión digital?",
+          "options": ["Visual Studio Code", "Eclipse", "NetBeans", "IntelliJ IDEA"],
           "correctIndex": 1,
-          "explanation": "Explicación breve."
+          "explanation": "Eclipse es el entorno de desarrollo utilizado para crear aplicaciones interactivas en televisión digital según el video."
+        },
+        {
+          "id": "v1q2",
+          "time": 50,
+          "question": "¿Qué componente es necesario instalar para poder ver y probar las aplicaciones desarrolladas?",
+          "options": ["Un navegador web", "Un servidor local", "Una máquina virtual", "Un compilador de Python"],
+          "correctIndex": 2,
+          "explanation": "La máquina virtual es fundamental para poder ver y probar las aplicaciones desarrolladas."
+        },
+        {
+          "id": "v1q3",
+          "time": 242,
+          "question": "¿Qué elementos se encuentran dentro de la carpeta 'media' mencionada en el video?",
+          "options": ["Solo archivos de audio", "Imágenes (JPEG y PNG), un archivo de texto y un video mp4", "Únicamente código fuente", "Documentación PDF del curso"],
+          "correctIndex": 1,
+          "explanation": "La carpeta media contiene imágenes en formatos JPEG y PNG, un archivo de texto y un video en formato mp4."
+        },
+        {
+          "id": "v1q4",
+          "time": 270,
+          "question": "¿Para qué sirve el video en formato mp4 que se encuentra en la carpeta media?",
+          "options": ["Para reproducir música de fondo", "Para emular el transporte string en la programación de televisión", "Para crear presentaciones multimedia", "Para editar contenido de video"],
+          "correctIndex": 1,
+          "explanation": "El video mp4 sirve para emular el transporte string en la programación de televisión digital."
+        },
+        {
+          "id": "v1q5",
+          "time": 90,
+          "question": "¿Qué herramienta se debe instalar para proporcionar las herramientas de desarrollo necesarias y garantizar que el entorno esté completamente configurado?",
+          "options": ["Python", "Node.js", "JDK (Java Development Kit)", "Android SDK"],
+          "correctIndex": 2,
+          "explanation": "El JDK es necesario para proporcionar las herramientas de desarrollo y garantizar la configuración completa del entorno."
         }
       ]
     },
-    { "id": 2, "title": "Video 2", "youtubeId": "e2XK5-eZ09k",
+    {
+      "id": 2,
+      "title": "Elementos multimedia y regiones",
+      "youtubeId": "e2XK5-eZ09k",
       "questions": [
         {
+          "id": "v2q1",
+          "time": 21,
+          "question": "¿Qué elementos multimedia se pueden incluir en una aplicación interactiva según el video?",
+          "options": ["Solo imágenes y videos", "Imágenes, videos, sonidos y textos", "Únicamente audio y texto", "Solo videos en formato HD"],
+          "correctIndex": 1,
+          "explanation": "Los elementos multimedia pueden incluir imágenes, videos, sonidos y textos."
+        },
+        {
           "id": "v2q2",
-          "time": 15,
-          "question": "¿...?",
-          "options": ["A", "B", "C", "D"],
+          "time": 40,
+          "question": "¿Qué son las 'regiones' en el contexto de aplicaciones interactivas?",
+          "options": ["Formatos de archivo multimedia", "Áreas específicas de la pantalla que determinan cómo y dónde se mostrarán los elementos multimedia", "Tipos de videos que se pueden reproducir", "Descriptores de audio"],
           "correctIndex": 1,
-          "explanation": "..."
+          "explanation": "Las regiones son áreas específicas de la pantalla con atributos como ancho, altura y posición que determinan cómo se mostrarán los elementos multimedia."
+        },
+        {
+          "id": "v2q3",
+          "time": 60,
+          "question": "¿Qué función cumple un 'descriptor' en relación con los elementos multimedia?",
+          "options": ["Comprime los archivos de video", "Define cómo se mostrará el elemento en la región, incluyendo propiedades como transparencia y duración", "Elimina elementos innecesarios", "Convierte formatos de archivo"],
+          "correctIndex": 1,
+          "explanation": "El descriptor define cómo se mostrará el elemento multimedia en la región, incluyendo propiedades como transparencia y duración de visualización."
+        },
+        {
+          "id": "v2q4",
+          "time": 270,
+          "question": "¿Qué porcentaje de ancho y alto se configuró para la región de video en el ejemplo práctico mostrado?",
+          "options": ["50% de ancho y alto", "75% de ancho y alto", "100% de ancho y alto", "80% de ancho y alto"],
+          "correctIndex": 2,
+          "explanation": "La región de video se configuró al 100% de ancho y alto para ocupar toda la pantalla disponible."
+        },
+        {
+          "id": "v2q5",
+          "time": 805,
+          "question": "¿Qué herramienta se utilizó para visualizar el video en la aplicación interactiva?",
+          "options": ["Un navegador web estándar", "Windows Media Player", "Un emulador (emulador de tubos)", "VLC Media Player"],
+          "correctIndex": 2,
+          "explanation": "Se utilizó un emulador de tubos para visualizar el contenido en pantalla."
         }
-    ] },
-    { "id": 3, "title": "Video 3", "youtubeId": "Cp8BgKtb24g", 
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Ajuste de regiones al 50%",
+      "youtubeId": "Cp8BgKtb24g",
       "questions": [
-      {
+        {
+          "id": "v3q1",
+          "time": 24,
+          "question": "¿Qué porcentaje de la pantalla se configura para la región de video en el centro según el tutorial?",
+          "options": ["25%", "75%", "50%", "100%"],
+          "correctIndex": 2,
+          "explanation": "El tutorial muestra cómo configurar la región de video al 50% en el centro de la pantalla."
+        },
+        {
+          "id": "v3q2",
+          "time": 155,
+          "question": "Si la región de video ocupa el 50% en el centro de la pantalla, ¿qué porcentaje de margen debe quedar a cada lado (izquierda y derecha)?",
+          "options": ["50% en cada lado", "25% en cada lado", "10% en cada lado", "30% en cada lado"],
+          "correctIndex": 1,
+          "explanation": "Al establecer un 50% en el centro, se requiere un 25% a cada lado (izquierda y derecha) para lograr el equilibrio."
+        },
+        {
           "id": "v3q3",
-          "time": 15,
-          "question": "¿...?",
-          "options": ["A", "B", "C", "D"],
+          "time": 50,
+          "question": "¿Cuál es el propósito principal de ajustar el tamaño de la región de video al 50% en el tutorial?",
+          "options": ["Ahorrar recursos del sistema", "Mejorar la experiencia del usuario y facilitar la visualización del contenido", "Reducir el tiempo de carga", "Aumentar la resolución del video"],
           "correctIndex": 1,
-          "explanation": "..."
+          "explanation": "El ajuste al 50% busca mejorar la experiencia del usuario durante la demostración del curso."
+        },
+        {
+          "id": "v3q4",
+          "time": 155,
+          "question": "¿Qué aspecto es crucial según el video para lograr una distribución equitativa en la pantalla?",
+          "options": ["El color de fondo", "La configuración de posiciones y proporciones", "La velocidad del emulador", "El formato del archivo de video"],
+          "correctIndex": 1,
+          "explanation": "La configuración de posiciones es crucial para lograr una distribución equitativa y un equilibrio adecuado."
+        },
+        {
+          "id": "v3q5",
+          "time": 175,
+          "question": "Además de los márgenes laterales, ¿qué otros elementos menciona el video que también afectan la presentación general?",
+          "options": ["Los colores de la interfaz", "Los topes superior e inferior", "El tipo de fuente utilizada", "La velocidad de reproducción"],
+          "correctIndex": 1,
+          "explanation": "Los topes superior e inferior también afectan la presentación general y deben ajustarse para una visualización óptima."
         }
-    ] },
-    { "id": 4, "title": "Video 4", "youtubeId": "aTTZJDoAnYs", 
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Regiones madre e hijas con transparencia",
+      "youtubeId": "aTTZJDoAnYs",
       "questions": [
-      {
+        {
+          "id": "v4q1",
+          "time": 28,
+          "question": "¿Qué tipos de elementos multimedia se pueden integrar en la aplicación interactiva según el video?",
+          "options": ["Solo videos y audios", "Imágenes, videos y archivos de texto", "Únicamente imágenes estáticas", "Solo archivos PDF y documentos"],
+          "correctIndex": 1,
+          "explanation": "La aplicación interactiva integra diferentes elementos multimedia como imágenes, videos y archivos de texto."
+        },
+        {
+          "id": "v4q2",
+          "time": 50,
+          "question": "¿Qué formatos de imagen se mencionan que se pueden utilizar en la aplicación?",
+          "options": ["BMP y GIF", "TIFF y SVG", "JP (JPEG) y PNG", "RAW y PSD"],
+          "correctIndex": 2,
+          "explanation": "Se utilizan imágenes en formatos JP (JPEG) y PNG, lo que permite flexibilidad en la presentación visual."
+        },
+        {
+          "id": "v4q3",
+          "time": 304,
+          "question": "¿Qué porcentaje de tope se establece para la superposición de imágenes y textos con el fin de mantener el orden visual?",
+          "options": ["10%", "25%", "50%", "75%"],
+          "correctIndex": 1,
+          "explanation": "Se establece un tope del 25% en la superposición de imágenes y textos para mantener el orden visual."
+        },
+        {
           "id": "v4q4",
-          "time": 15,
-          "question": "¿...?",
-          "options": ["A", "B", "C", "D"],
+          "time": 571,
+          "question": "¿Qué son las 'regiones madre e hijas' mencionadas en el video?",
+          "options": ["Tipos de archivos multimedia", "Una estructura jerárquica de regiones donde las regiones hijas dependen de la región madre", "Formatos de compresión de video", "Diferentes resoluciones de pantalla"],
           "correctIndex": 1,
-          "explanation": "..."
+          "explanation": "Las regiones madre e hijas forman una estructura jerárquica donde redimensionar la región madre afecta a sus regiones hijas."
+        },
+        {
+          "id": "v4q5",
+          "time": 844,
+          "question": "¿Qué característica adicional se menciona que se puede aplicar a las imágenes para crear efectos visuales atractivos?",
+          "options": ["Rotación automática", "Filtros de color", "Niveles de transparencia", "Efectos de animación 3D"],
+          "correctIndex": 2,
+          "explanation": "Se introduce la idea de manejar niveles de transparencia en imágenes para crear superposiciones y efectos visuales atractivos."
         }
-    ] },
-    { "id": 5, "title": "Video 5", "youtubeId": "ioLSrkXXT9E", 
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Conectores y enlaces multimedia",
+      "youtubeId": "ioLSrkXXT9E",
       "questions": [
-      {
+        {
+          "id": "v5q1",
+          "time": 29,
+          "question": "¿Qué elementos multimedia se combinan en el ejemplo 8 presentado en el video?",
+          "options": ["Un video y un archivo de audio", "Un video y una imagen", "Dos videos diferentes", "Una imagen y un archivo de texto"],
+          "correctIndex": 1,
+          "explanation": "El ejemplo 8 combina un video en formato MP4 y una imagen PNG."
+        },
+        {
+          "id": "v5q2",
+          "time": 40,
+          "question": "¿Cuántas puertas de entrada se utilizan para el video en este ejemplo?",
+          "options": ["Dos puertas de entrada", "Tres puertas de entrada", "Una única puerta de entrada", "Ninguna puerta de entrada"],
+          "correctIndex": 2,
+          "explanation": "Se utiliza una única puerta de entrada para el video en este ejemplo."
+        },
+        {
+          "id": "v5q3",
+          "time": 50,
+          "question": "¿Qué concepto permite que al iniciar un elemento multimedia, otro elemento se presente simultáneamente?",
+          "options": ["Contexto local", "Contexto global", "Contexto relativo", "Contexto dinámico"],
+          "correctIndex": 1,
+          "explanation": "El contexto global permite que al iniciar un elemento multimedia, otro elemento se presente simultáneamente."
+        },
+        {
+          "id": "v5q4",
+          "time": 164,
+          "question": "¿Qué herramientas de programación se utilizan para vincular diferentes elementos multimedia y permitir que la imagen se presente al inicio del video?",
+          "options": ["Variables y funciones", "Conectores y enlaces", "Bucles y condicionales", "Arrays y objetos"],
+          "correctIndex": 1,
+          "explanation": "Se utilizan conectores y enlaces para vincular diferentes elementos multimedia y crear interactividad."
+        },
+        {
           "id": "v5q5",
-          "time": 15,
-          "question": "¿...?",
-          "options": ["A", "B", "C", "D"],
-          "correctIndex": 1,
-          "explanation": "..."
+          "time": 444,
+          "question": "¿Qué se menciona que se utilizará en el futuro para activar elementos multimedia de manera interactiva?",
+          "options": ["El mouse o ratón", "Comandos de voz", "Teclas del control remoto", "Gestos táctiles"],
+          "correctIndex": 2,
+          "explanation": "Se anticipa el uso de teclas del control remoto para activar elementos multimedia de manera interactiva."
         }
-    ] },
-    { "id": 6, "title": "Video 6", "youtubeId": "TDZK5rVnUH0", 
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Programación con control remoto",
+      "youtubeId": "TDZK5rVnUH0",
       "questions": [
-      {
-          "id": "v6q6",
-          "time": 15,
-          "question": "¿...?",
-          "options": ["A", "B", "C", "D"],
+        {
+          "id": "v6q1",
+          "time": 82,
+          "question": "¿Qué cuatro colores de botones del control remoto se utilizan en la aplicación interactiva?",
+          "options": ["Rojo, negro, blanco y verde", "Azul, amarillo, rojo y verde", "Naranja, morado, azul y amarillo", "Verde, rosa, azul y gris"],
           "correctIndex": 1,
-          "explanation": "..."
+          "explanation": "Los cuatro botones de colores utilizados son azul, amarillo, rojo y verde."
+        },
+        {
+          "id": "v6q2",
+          "time": 102,
+          "question": "¿Qué ocurre cuando se selecciona un botón de color en la aplicación?",
+          "options": ["Se reproduce un sonido específico", "Se cierra la aplicación", "Se muestra la imagen correspondiente a ese color", "Se cambia el fondo de pantalla"],
+          "correctIndex": 2,
+          "explanation": "Al seleccionar un color, se muestra la imagen relacionada con ese color específico."
+        },
+        {
+          "id": "v6q3",
+          "time": 270,
+          "question": "¿Qué nivel de transparencia se aplica a cada imagen asociada a los colores?",
+          "options": ["10%", "20%", "50%", "100%"],
+          "correctIndex": 1,
+          "explanation": "Cada imagen tiene un nivel de transparencia del 20%."
+        },
+        {
+          "id": "v6q4",
+          "time": 562,
+          "question": "¿Qué herramienta se menciona que permite realizar pruebas interactivas con diferentes teclas del teclado?",
+          "options": ["Un simulador virtual", "Un depurador de código", "Un emulador", "Un compilador"],
+          "correctIndex": 2,
+          "explanation": "Se utiliza un emulador para realizar pruebas interactivas con diferentes teclas del teclado."
+        },
+        {
+          "id": "v6q5",
+          "time": 840,
+          "question": "¿Qué principio importante se debe asegurar al presionar un botón de color para evitar confusiones en la visualización?",
+          "options": ["Que todas las imágenes se muestren simultáneamente", "Que solo una imagen esté visible al mismo tiempo", "Que las imágenes parpadeen constantemente", "Que ninguna imagen se muestre"],
+          "correctIndex": 1,
+          "explanation": "Se debe asegurar que solo una imagen esté visible al mismo tiempo para evitar confusiones en la visualización."
         }
-    ] }
+      ]
+    }
   ]
 }
