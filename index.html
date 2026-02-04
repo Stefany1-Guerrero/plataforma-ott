@@ -585,12 +585,6 @@
           btn.addEventListener('click', async () => {
             const videoNum = btn.dataset.video;
             const videoId = videoLinks[videoNum];
-            
-            if (!videoId) {
-              showMessage('error', `No se encontró youtubeId para el Video ${videoNum}. Revisa datos/content.json`);
-              return;
-            }
-
             const videoPlayer = document.getElementById('video-player');
             const videoTitle = document.getElementById('video-title');
 
