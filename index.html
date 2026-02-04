@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Plataforma OTT - Firebase</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -12,7 +12,7 @@
   <script type="module">
     let currentUser = null;
 
-    // ✅ OJO: Ajusta esta URL si tu repo realmente usa /datos/contenido.json (y no /data/content.json)
+    // ✅ content.json
     const CONTENT_URL = 'https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json';
 
     let contentCache = null;
@@ -33,14 +33,14 @@
       signOut
     } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
-    // ✅ Importa helpers extra (tu grupo: stats + eventos + guardado)
     import {
       getFirestore,
       doc,
       setDoc,
       getDoc,
       collection,
-      addDoc
+      addDoc,
+      updateDoc
     } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     // ===== YouTube IFrame API + Quiz state =====
@@ -52,33 +52,64 @@
     let currentQuestions = [];
     let askedQuestions = new Set();
 
-    // ======= ✅ (GRUPO 4) Estadística =======
+    // ========= NUEVO MODELO DE INTENTOS (TABLA) =========
+    // Cada vez que abres un video => se crea un "attempt" nuevo (fila) en:
+    // users/{uid}/attempts/{attemptId}
+    let attemptId = null;
+    let attemptPhase = 'idle'; // 'playback' | 'review' | 'ended' | 'idle'
+
+    // Resumen del intento (se guarda por attemptId, no se sobreescribe por videoId)
     let stats = {
       videoId: null,
-      score: 0,
-      answered: 0, // preguntas COMPLETADAS (cuando el usuario acierta)
-      correct: 0,
-      wrong: 0,    // intentos incorrectos (cada click incorrecto suma 1)
-      clicks: 0
+      attemptId: null,
+      startedAt: null,
+      endedAt: null,
+
+      // Playback (durante video)
+      playbackAnswered: 0,     // preguntas respondidas durante el video (1 intento por pregunta)
+      playbackCorrect: 0,
+      playbackWrong: 0,
+      clicks: 0,
+
+      // Review (al final)
+      reviewAnswered: 0,       // preguntas completadas en repaso (cuando aciertas)
+      reviewCorrect: 0,
+      reviewWrong: 0,
+      score: 0
     };
 
-    let completedQuestions = new Set(); // preguntas ya completadas (cuando acierta por primera vez)
-    let wrongAttemptsByQ = {};          // { questionId: #intentosIncorrectosAntesDeAcertar }
+    // Estado por pregunta (durante reproducción)
+    // qState[qid] = { playback: { answered, isCorrect, selectedIndex }, review: { completed, wrongAttempts } }
+    let qState = {};
 
-    function calcAccuracy() {
-      return stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0;
+    function isoNow() { return new Date().toISOString(); }
+
+    function calcAccuracyReview() {
+      return stats.reviewAnswered ? Math.round((stats.reviewCorrect / stats.reviewAnswered) * 100) : 0;
     }
 
     function updateScoreboard() {
       const el = document.getElementById('scoreboard');
       if (!el) return;
-      el.textContent = `Puntaje: ${stats.score} | Respondidas: ${stats.answered}`;
+      // Durante el video mostramos progreso, no puntaje.
+      if (attemptPhase === 'playback') {
+        el.textContent = `Progreso: ${stats.playbackAnswered}/${currentQuestions.length} | Aciertos: ${stats.playbackCorrect} | Fallos: ${stats.playbackWrong}`;
+        return;
+      }
+      // En repaso/fin mostramos puntaje real
+      el.textContent = `Puntaje: ${stats.score} | Repaso completadas: ${stats.reviewAnswered}/${currentQuestions.length}`;
     }
 
     function updateScoreDetails() {
       const el = document.getElementById('score-details');
       if (!el) return;
-      el.textContent = `Aciertos: ${stats.correct} | Errores: ${stats.wrong} | %: ${calcAccuracy()}% | Clics: ${stats.clicks}`;
+
+      if (attemptPhase === 'playback') {
+        el.textContent = `Clics: ${stats.clicks} | (En reproducción no hay reintentos: si fallas, continúa el video)`;
+        return;
+      }
+
+      el.textContent = `Repaso → Aciertos: ${stats.reviewCorrect} | Errores: ${stats.reviewWrong} | %: ${calcAccuracyReview()}% | Clics: ${stats.clicks}`;
     }
 
     async function logEvent(type, extra = {}) {
@@ -87,51 +118,76 @@
         await addDoc(collection(db, 'users', currentUser.uid, 'events'), {
           type,
           videoId: stats.videoId,
+          attemptId: stats.attemptId,
+          phase: attemptPhase,
           ...extra,
-          createdAt: new Date().toISOString(),
+          createdAt: isoNow(),
         });
       } catch (e) {
         console.warn('No se pudo guardar evento', e);
       }
     }
 
-    async function saveAnswer({ videoId, questionId, attemptsWrong, timeInVideo }) {
-      if (!currentUser) return;
+    async function createAttempt(videoId) {
+      if (!currentUser) return null;
       try {
-        await addDoc(collection(db, 'users', currentUser.uid, 'answers'), {
+        const ref = await addDoc(collection(db, 'users', currentUser.uid, 'attempts'), {
           videoId,
-          questionId,
-          attemptsWrong,
-          timeInVideo,
-          answeredAt: new Date().toISOString()
+          startedAt: isoNow(),
+          status: 'in_progress'
         });
+        return ref.id;
       } catch (e) {
-        console.warn('No se pudo guardar respuesta', e);
+        console.warn('No se pudo crear attempt', e);
+        return null;
       }
     }
 
-    async function saveVideoSummary() {
-      if (!currentUser || !stats.videoId) return;
-
-      const accuracy = stats.answered ? (stats.correct / stats.answered) : 0;
-
+    async function saveAttemptSummary(finalStatus = 'finished') {
+      if (!currentUser || !stats.attemptId) return;
       try {
-        await setDoc(
-          doc(db, 'users', currentUser.uid, 'videoAttempts', String(stats.videoId)),
-          {
-            videoId: stats.videoId,
-            score: stats.score,
-            answered: stats.answered,
-            correct: stats.correct,
-            wrong: stats.wrong,
-            clicks: stats.clicks,
-            accuracy,
-            updatedAt: new Date().toISOString()
-          },
-          { merge: true }
-        );
+        const attemptRef = doc(db, 'users', currentUser.uid, 'attempts', stats.attemptId);
+        await updateDoc(attemptRef, {
+          videoId: stats.videoId,
+          startedAt: stats.startedAt,
+          endedAt: stats.endedAt || null,
+          status: finalStatus,
+
+          playbackAnswered: stats.playbackAnswered,
+          playbackCorrect: stats.playbackCorrect,
+          playbackWrong: stats.playbackWrong,
+          clicks: stats.clicks,
+
+          reviewAnswered: stats.reviewAnswered,
+          reviewCorrect: stats.reviewCorrect,
+          reviewWrong: stats.reviewWrong,
+          score: stats.score,
+          accuracyReview: stats.reviewAnswered ? (stats.reviewCorrect / stats.reviewAnswered) : 0,
+
+          updatedAt: isoNow()
+        });
       } catch (e) {
-        console.warn('No se pudo guardar resumen del video', e);
+        console.warn('No se pudo guardar resumen del attempt', e);
+      }
+    }
+
+    async function saveAnswerRow({ questionId, timeInVideo, selectedIndex, isCorrect, phase, wrongAttemptsInReview = 0 }) {
+      if (!currentUser || !stats.attemptId) return;
+      try {
+        // Guardamos “filas” de respuestas bajo el attempt (más limpio para tu tabla)
+        await addDoc(collection(db, 'users', currentUser.uid, 'attempts', stats.attemptId, 'answers'), {
+          videoId: stats.videoId,
+          attemptId: stats.attemptId,
+          questionId,
+          timeInVideo,
+          selectedIndex,
+          isCorrect,
+          phase, // 'playback' o 'review'
+          wrongAttemptsInReview,
+          createdAt: isoNow()
+        });
+      } catch (e) {
+        console.warn('No se pudo guardar respuesta', e);
       }
     }
 
@@ -139,11 +195,9 @@
     function loadYouTubeAPI() {
       return new Promise((resolve) => {
         if (window.YT && window.YT.Player) return resolve();
-
         const tag = document.createElement('script');
         tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
-
         window.onYouTubeIframeAPIReady = () => resolve();
       });
     }
@@ -158,32 +212,173 @@
 
       quizInterval = setInterval(() => {
         if (!ytPlayer || !currentQuestions.length) return;
+        if (attemptPhase !== 'playback') return;
 
         const t = Math.floor(ytPlayer.getCurrentTime());
 
-        // pregunta exacta en ese segundo
+        // pregunta exacta en ese segundo (si quieres más tolerancia, se cambia a rango)
         const q = currentQuestions.find(q => q.time === t && !askedQuestions.has(q.id));
         if (q) {
           askedQuestions.add(q.id);
-          showQuiz(q);
+          showQuizPlayback(q);
         }
       }, 500);
     }
 
-    function showQuiz(q) {
-      // pausa video
+    function setOverlayVisible(show) {
+      const overlay = document.getElementById('quiz-overlay');
+      if (!overlay) return;
+      overlay.style.display = show ? 'flex' : 'none';
+    }
+
+    function disableOptionButtons() {
+      const optsEl = document.getElementById('quiz-options');
+      if (!optsEl) return;
+      optsEl.querySelectorAll('button').forEach(b => {
+        b.disabled = true;
+        b.classList.add('opacity-60', 'cursor-not-allowed');
+      });
+    }
+
+    // ========= NUEVO: DURANTE VIDEO (1 intento y SIGUE) =========
+    function showQuizPlayback(q) {
       try { ytPlayer.pauseVideo(); } catch {}
 
-      const overlay = document.getElementById('quiz-overlay');
       const qEl = document.getElementById('quiz-question');
       const optsEl = document.getElementById('quiz-options');
       const fbEl = document.getElementById('quiz-feedback');
       const btnContinue = document.getElementById('quiz-continue');
 
       qEl.textContent = q.question;
-      fbEl.textContent = '';
+      fbEl.textContent = 'Selecciona una opción (si fallas, se registrará y el video continuará).';
       fbEl.className = "text-sm mt-3 text-gray-300";
       btnContinue.style.display = 'none';
+      optsEl.innerHTML = '';
+
+      // asegurar estado
+      if (!qState[q.id]) {
+        qState[q.id] = {
+          playback: { answered: false, isCorrect: false, selectedIndex: null },
+          review: { completed: false, wrongAttempts: 0 }
+        };
+      }
+
+      q.options.forEach((opt, idx) => {
+        const btn = document.createElement('button');
+        btn.className = "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
+        btn.textContent = opt;
+
+        btn.addEventListener('click', async () => {
+          // 1) cuenta clic
+          stats.clicks += 1;
+          updateScoreDetails();
+          await logEvent('select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
+
+          // 2) evita reintentos en playback
+          disableOptionButtons();
+
+          const isCorrect = idx === q.correctIndex;
+
+          // marcar respuesta de playback solo una vez
+          if (!qState[q.id].playback.answered) {
+            qState[q.id].playback.answered = true;
+            qState[q.id].playback.selectedIndex = idx;
+            qState[q.id].playback.isCorrect = isCorrect;
+
+            stats.playbackAnswered += 1;
+            if (isCorrect) stats.playbackCorrect += 1;
+            else stats.playbackWrong += 1;
+
+            updateScoreboard();
+            updateScoreDetails();
+
+            await saveAnswerRow({
+              questionId: q.id,
+              timeInVideo: q.time,
+              selectedIndex: idx,
+              isCorrect,
+              phase: 'playback'
+            });
+
+            await saveAttemptSummary('in_progress');
+          }
+
+          // feedback corto y continuar SOLO
+          if (isCorrect) {
+            fbEl.textContent = `✅ Correcto. Continuando...`;
+            fbEl.className = "text-sm mt-3 text-green-300";
+          } else {
+            fbEl.textContent = `❌ Incorrecto. Se registró el fallo. Continuando...`;
+            fbEl.className = "text-sm mt-3 text-red-300";
+          }
+
+          setTimeout(async () => {
+            setOverlayVisible(false);
+            await logEvent('resume_after_answer', { questionId: q.id, timeInVideo: q.time, isCorrect });
+            try { ytPlayer.playVideo(); } catch {}
+          }, 900);
+        });
+
+        optsEl.appendChild(btn);
+      });
+
+      setOverlayVisible(true);
+    }
+
+    // ========= NUEVO: REPASO AL FINAL (aquí sí reintentas hasta acertar) =========
+    let reviewQueue = [];
+    let reviewIndex = 0;
+
+    function buildReviewQueue(mode = 'wrong_only') {
+      // wrong_only: solo las que falló en playback
+      // all: todas
+      const all = currentQuestions.slice();
+      if (mode === 'all') return all;
+
+      return all.filter(q => {
+        const st = qState[q.id]?.playback;
+        // si no respondió durante el video, también entra al repaso
+        if (!st || !st.answered) return true;
+        return st.answered && !st.isCorrect;
+      });
+    }
+
+    function startReview(mode = 'wrong_only') {
+      attemptPhase = 'review';
+      reviewQueue = buildReviewQueue(mode);
+      reviewIndex = 0;
+
+      updateScoreboard();
+      updateScoreDetails();
+
+      if (!reviewQueue.length) {
+        showEndModal(true); // mostrar resultados igual
+        return;
+      }
+      showReviewQuestion(reviewQueue[reviewIndex]);
+    }
+
+    function showReviewQuestion(q) {
+      // (video ya terminó o está pausado)
+      try { ytPlayer.pauseVideo(); } catch {}
+
+      const qEl = document.getElementById('quiz-question');
+      const optsEl = document.getElementById('quiz-options');
+      const fbEl = document.getElementById('quiz-feedback');
+      const btnContinue = document.getElementById('quiz-continue');
+
+      if (!qState[q.id]) {
+        qState[q.id] = {
+          playback: { answered: false, isCorrect: false, selectedIndex: null },
+          review: { completed: false, wrongAttempts: 0 }
+        };
+      }
+
+      qEl.textContent = `REPASO (${reviewIndex + 1}/${reviewQueue.length}) → ${q.question}`;
+      fbEl.textContent = 'Responde hasta acertar. El puntaje se calcula aquí.';
+      fbEl.className = "text-sm mt-3 text-gray-300";
+      btnContinue.style.display = 'none';
+      btnContinue.textContent = 'Siguiente';
       optsEl.innerHTML = '';
 
       q.options.forEach((opt, idx) => {
@@ -192,66 +387,97 @@
         btn.textContent = opt;
 
         btn.addEventListener('click', async () => {
-          // ✅ (GRUPO 4) registrar clic/selección
           stats.clicks += 1;
           updateScoreDetails();
-          await logEvent('select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
+          await logEvent('review_select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
 
           const isCorrect = idx === q.correctIndex;
 
           if (isCorrect) {
             fbEl.textContent = `✅ Correcto. ${q.explanation || ''}`;
             fbEl.className = "text-sm mt-3 text-green-300";
-            btnContinue.style.display = 'inline-flex';
 
-            // ✅ Solo contar si no estaba completada ya (evita doble conteo)
-            if (!completedQuestions.has(q.id)) {
-              completedQuestions.add(q.id);
+            // contar solo primera vez que completa en repaso
+            if (!qState[q.id].review.completed) {
+              qState[q.id].review.completed = true;
 
-              const wrongAttempts = wrongAttemptsByQ[q.id] || 0;
+              stats.reviewCorrect += 1;
+              stats.reviewAnswered += 1;
+              stats.score += 1; // 1 punto por pregunta completada en repaso
 
-              stats.correct += 1;
-              stats.answered += 1;
-
-              // Puntaje: 1 punto por pregunta (pueden cambiarlo a 10 si quieren)
-              stats.score += 1;
-
-              updateScoreboard();
-              updateScoreDetails();
-
-              // guardar respuesta + resumen parcial
-              await saveAnswer({
-                videoId: stats.videoId,
+              // guardar fila de respuesta en repaso
+              await saveAnswerRow({
                 questionId: q.id,
-                attemptsWrong: wrongAttempts,
-                timeInVideo: q.time
+                timeInVideo: q.time,
+                selectedIndex: idx,
+                isCorrect: true,
+                phase: 'review',
+                wrongAttemptsInReview: qState[q.id].review.wrongAttempts
               });
 
-              await saveVideoSummary();
+              await saveAttemptSummary('in_progress');
             }
+
+            // habilitar "Siguiente"
+            btnContinue.style.display = 'inline-flex';
+            btnContinue.onclick = async () => {
+              reviewIndex += 1;
+              if (reviewIndex >= reviewQueue.length) {
+                setOverlayVisible(false);
+                await logEvent('review_finished');
+                showEndModal(true);
+                return;
+              }
+              showReviewQuestion(reviewQueue[reviewIndex]);
+            };
           } else {
-            fbEl.textContent = "❌ Incorrecto. Intenta otra vez.";
+            fbEl.textContent = `❌ Incorrecto. Intenta otra vez.`;
             fbEl.className = "text-sm mt-3 text-red-300";
 
-            stats.wrong += 1;
-            wrongAttemptsByQ[q.id] = (wrongAttemptsByQ[q.id] || 0) + 1;
+            stats.reviewWrong += 1;
+            qState[q.id].review.wrongAttempts += 1;
 
             updateScoreDetails();
-            await logEvent('wrong_attempt', { questionId: q.id, timeInVideo: q.time });
-            await saveVideoSummary();
+            await logEvent('review_wrong_attempt', { questionId: q.id, timeInVideo: q.time });
+
+            await saveAttemptSummary('in_progress');
           }
+
+          updateScoreboard();
+          updateScoreDetails();
         });
 
         optsEl.appendChild(btn);
       });
 
-      btnContinue.onclick = async () => {
-        overlay.style.display = 'none';
-        await logEvent('continue', { questionId: q.id, timeInVideo: q.time });
-        try { ytPlayer.playVideo(); } catch {}
-      };
+      setOverlayVisible(true);
+    }
 
-      overlay.style.display = 'flex';
+    // ========= MODAL FINAL =========
+    function showEndModal(show) {
+      const modal = document.getElementById('end-modal');
+      if (!modal) return;
+      modal.style.display = show ? 'flex' : 'none';
+
+      const summary = document.getElementById('end-summary');
+      if (summary) {
+        const total = currentQuestions.length;
+        const wrongInPlayback = Object.values(qState).filter(s => s.playback?.answered && !s.playback.isCorrect).length;
+        const unansweredInPlayback = currentQuestions.filter(q => !qState[q.id]?.playback?.answered).length;
+
+        summary.innerHTML = `
+          <div class="text-sm text-gray-200 space-y-2">
+            <div><b>Video:</b> ${stats.videoId}</div>
+            <div><b>Attempt ID:</b> ${stats.attemptId || '-'}</div>
+            <hr class="border-white/10 my-2"/>
+            <div class="text-gray-300"><b>Durante video:</b> respondidas ${stats.playbackAnswered}/${total}, aciertos ${stats.playbackCorrect}, fallos ${stats.playbackWrong}</div>
+            <div class="text-gray-300"><b>Para repaso:</b> incorrectas ${wrongInPlayback}, no respondidas ${unansweredInPlayback}</div>
+            <hr class="border-white/10 my-2"/>
+            <div class="text-gray-100"><b>Puntaje repaso:</b> ${stats.score}</div>
+            <div class="text-gray-300"><b>Repaso:</b> completadas ${stats.reviewAnswered}/${total}, % ${calcAccuracyReview()}%</div>
+          </div>
+        `;
+      }
     }
 
     // Configuración de Firebase
@@ -280,9 +506,7 @@
       messageDiv.style.display = 'flex';
 
       if (type === 'success') {
-        setTimeout(() => {
-          messageDiv.style.display = 'none';
-        }, 3000);
+        setTimeout(() => { messageDiv.style.display = 'none'; }, 3000);
       }
     }
 
@@ -296,12 +520,10 @@
         showMessage('error', 'Todos los campos son obligatorios');
         return;
       }
-
       if (password !== confirmPassword) {
         showMessage('error', 'Las contraseñas no coinciden');
         return;
       }
-
       if (password.length < 6) {
         showMessage('error', 'La contraseña debe tener al menos 6 caracteres');
         return;
@@ -312,14 +534,13 @@
         const user = userCredential.user;
 
         await setDoc(doc(db, 'users', user.uid), {
-          name: name,
-          email: email,
-          createdAt: new Date().toISOString(),
+          name,
+          email,
+          createdAt: isoNow(),
           subscription: 'basic'
         });
 
         showMessage('success', '¡Registro exitoso! Redirigiendo...');
-
         setTimeout(() => {
           document.getElementById('reg-name').value = '';
           document.getElementById('reg-email').value = '';
@@ -331,15 +552,9 @@
       } catch (error) {
         console.error('Error:', error);
         let errorMessage = 'Error al registrar usuario';
-
-        if (error.code === 'auth/email-already-in-use') {
-          errorMessage = 'Este email ya está registrado';
-        } else if (error.code === 'auth/invalid-email') {
-          errorMessage = 'Email inválido';
-        } else if (error.code === 'auth/weak-password') {
-          errorMessage = 'La contraseña es muy débil';
-        }
-
+        if (error.code === 'auth/email-already-in-use') errorMessage = 'Este email ya está registrado';
+        else if (error.code === 'auth/invalid-email') errorMessage = 'Email inválido';
+        else if (error.code === 'auth/weak-password') errorMessage = 'La contraseña es muy débil';
         showMessage('error', errorMessage);
       }
     }
@@ -356,21 +571,13 @@
       try {
         await signInWithEmailAndPassword(auth, email, password);
         showMessage('success', 'Iniciando sesión...');
-
       } catch (error) {
         console.error('Error:', error);
         let errorMessage = 'Error al iniciar sesión';
-
-        if (error.code === 'auth/user-not-found') {
-          errorMessage = 'Usuario no encontrado';
-        } else if (error.code === 'auth/wrong-password') {
-          errorMessage = 'Contraseña incorrecta';
-        } else if (error.code === 'auth/invalid-credential') {
-          errorMessage = 'Email o contraseña incorrectos';
-        } else if (error.code === 'auth/too-many-requests') {
-          errorMessage = 'Demasiados intentos. Intenta más tarde';
-        }
-
+        if (error.code === 'auth/user-not-found') errorMessage = 'Usuario no encontrado';
+        else if (error.code === 'auth/wrong-password') errorMessage = 'Contraseña incorrecta';
+        else if (error.code === 'auth/invalid-credential') errorMessage = 'Email o contraseña incorrectos';
+        else if (error.code === 'auth/too-many-requests') errorMessage = 'Demasiados intentos. Intenta más tarde';
         showMessage('error', errorMessage);
       }
     }
@@ -466,7 +673,6 @@
       document.getElementById('register-form').style.display = 'none';
       document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
       document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-
       const messageDiv = document.getElementById('message');
       if (messageDiv) messageDiv.style.display = 'none';
     }
@@ -476,7 +682,6 @@
       document.getElementById('register-form').style.display = 'block';
       document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
       document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-
       const messageDiv = document.getElementById('message');
       if (messageDiv) messageDiv.style.display = 'none';
     }
@@ -499,12 +704,12 @@
               <div id="message" style="display: none;"></div>
 
               <div class="bg-gray-700/30 rounded-xl p-6 mb-6">
-                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData.name}! 👋</h2>
+                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData?.name || 'Usuario'}! 👋</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300">
-                  <p>📧 Email: ${userData.email}</p>
-                  <p>💎 Plan: ${userData.subscription.toUpperCase()}</p>
+                  <p>📧 Email: ${userData?.email || user.email}</p>
+                  <p>💎 Plan: ${(userData?.subscription || 'basic').toUpperCase()}</p>
                   <p>✅ Estado: Activo</p>
-                  <p>📅 Miembro desde: ${new Date(userData.createdAt).toLocaleDateString()}</p>
+                  <p>📅 Miembro desde: ${userData?.createdAt ? new Date(userData.createdAt).toLocaleDateString() : '-'}</p>
                   <p>🔥 Base de datos: Firebase Firestore</p>
                   <p>🔒 Seguridad: Activada</p>
                 </div>
@@ -515,7 +720,7 @@
                 <p class="text-gray-300 mb-4">Explora todo el contenido de streaming disponible.</p>
 
                 <div id="video-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  ${[1, 2, 3, 4, 5, 6].map(num => `
+                  ${[1,2,3,4,5,6].map(num => `
                     <button class="video-btn bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer" data-video="${num}">
                       <p class="text-white font-medium text-sm md:text-base">🎬 Video ${num}</p>
                     </button>
@@ -526,10 +731,8 @@
                   <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
                     <div>
                       <h4 class="text-lg font-semibold text-white" id="video-title"></h4>
-
-                      <!-- ✅ (GRUPO 4) Marcador como el ejemplo -->
-                      <div class="text-sm text-gray-200 mt-1" id="scoreboard">Puntaje: 0 | Respondidas: 0</div>
-                      <div class="text-xs text-gray-300 mt-1" id="score-details">Aciertos: 0 | Errores: 0 | %: 0% | Clics: 0</div>
+                      <div class="text-sm text-gray-200 mt-1" id="scoreboard">Progreso: 0/0 | Aciertos: 0 | Fallos: 0</div>
+                      <div class="text-xs text-gray-300 mt-1" id="score-details">Clics: 0</div>
                     </div>
 
                     <button id="close-video" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -539,10 +742,8 @@
 
                   <div class="relative" style="padding-bottom: 56.25%; height: 0;">
                     <div class="relative" style="padding-bottom: 56.25%; height: 0;">
-                      <!-- Aquí vive el reproductor controlable -->
                       <div id="youtube-player" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
 
-                      <!-- Overlay de preguntas -->
                       <div id="quiz-overlay"
                         style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"
                         class="bg-black/70 flex items-center justify-center p-4">
@@ -560,6 +761,35 @@
                           </div>
                         </div>
                       </div>
+
+                      <!-- Modal final -->
+                      <div id="end-modal" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"
+                        class="bg-black/70 flex items-center justify-center p-4">
+                        <div class="w-full max-w-2xl bg-gray-900 rounded-2xl border border-purple-500/30 p-6">
+                          <h3 class="text-white text-xl font-bold mb-3">✅ Video finalizado — Resultados del intento</h3>
+                          <div id="end-summary" class="mb-4"></div>
+
+                          <div class="flex flex-wrap gap-2 justify-end">
+                            <button id="btn-review-wrong" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
+                              Repasar incorrectas/no respondidas
+                            </button>
+                            <button id="btn-review-all" class="px-4 py-2 bg-purple-600/70 hover:bg-purple-700 text-white rounded-lg">
+                              Repasar todas
+                            </button>
+                            <button id="btn-retry-video" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
+                              Repetir video (nuevo intento)
+                            </button>
+                            <button id="btn-end-close" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg">
+                              Cerrar
+                            </button>
+                          </div>
+
+                          <p class="text-xs text-gray-400 mt-4">
+                            Cada vez que repites el video se crea un nuevo intento (fila) en Firestore: <b>users/{uid}/attempts</b>.
+                          </p>
+                        </div>
+                      </div>
+
                     </div>
                   </div>
                 </div>
@@ -573,7 +803,6 @@
 
         const data = await loadContent();
 
-        // mapa para usar igual que antes
         const videoLinks = {};
         const videoTitles = {};
         data.videos.forEach(v => {
@@ -581,95 +810,157 @@
           videoTitles[String(v.id)] = v.title || `Video ${v.id}`;
         });
 
+        async function openVideo(videoNum) {
+          const videoId = videoLinks[String(videoNum)];
+          const videoPlayer = document.getElementById('video-player');
+          const videoTitle = document.getElementById('video-title');
+
+          // Cargar preguntas del video
+          currentVideoObj = data.videos.find(v => String(v.id) === String(videoNum)) || null;
+          currentQuestions = (currentVideoObj?.questions || []).slice().sort((a,b) => a.time - b.time);
+          askedQuestions = new Set();
+
+          // reset intento (nuevo)
+          attemptPhase = 'playback';
+          qState = {};
+
+          const newAttemptId = await createAttempt(Number(videoNum));
+          attemptId = newAttemptId;
+
+          stats = {
+            videoId: Number(videoNum),
+            attemptId,
+            startedAt: isoNow(),
+            endedAt: null,
+
+            playbackAnswered: 0,
+            playbackCorrect: 0,
+            playbackWrong: 0,
+            clicks: 0,
+
+            reviewAnswered: 0,
+            reviewCorrect: 0,
+            reviewWrong: 0,
+            score: 0
+          };
+
+          updateScoreboard();
+          updateScoreDetails();
+
+          await logEvent('open_video', { videoId: stats.videoId });
+
+          await loadYouTubeAPI();
+
+          const playerDivId = 'youtube-player';
+
+          if (ytPlayer) {
+            ytPlayer.loadVideoById(videoId);
+          } else {
+            ytPlayer = new YT.Player(playerDivId, {
+              videoId,
+              playerVars: { autoplay: 1, rel: 0 },
+              events: {
+                onReady: async () => {
+                  await logEvent('player_ready', { videoId: stats.videoId });
+                  startQuizWatcher();
+                },
+                onStateChange: async (e) => {
+                  if (e.data === YT.PlayerState.PLAYING) {
+                    await logEvent('play', { videoId: stats.videoId });
+                    startQuizWatcher();
+                  }
+                  if (e.data === YT.PlayerState.PAUSED) {
+                    await logEvent('pause', { videoId: stats.videoId });
+                  }
+                  if (e.data === YT.PlayerState.ENDED) {
+                    // VIDEO TERMINÓ
+                    attemptPhase = 'ended';
+                    stopQuizWatcher();
+
+                    stats.endedAt = isoNow();
+                    await logEvent('ended', { videoId: stats.videoId });
+
+                    await saveAttemptSummary('finished');
+                    updateScoreboard();
+                    updateScoreDetails();
+
+                    showEndModal(true);
+                  }
+                }
+              }
+            });
+          }
+
+          // mostrar UI player
+          videoTitle.textContent = videoTitles[String(videoNum)] || `Video ${videoNum}`;
+          videoPlayer.style.display = 'block';
+          videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+          // iniciar watcher
+          startQuizWatcher();
+        }
+
+        // Botones de video
         document.querySelectorAll('.video-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
             const videoNum = btn.dataset.video;
-            const videoId = videoLinks[videoNum];
-            const videoPlayer = document.getElementById('video-player');
-            const videoTitle = document.getElementById('video-title');
-
-            // 1) Cargar el objeto del video (para sus preguntas)
-            currentVideoObj = data.videos.find(v => String(v.id) === String(videoNum)) || null;
-            currentQuestions = (currentVideoObj?.questions || []).slice().sort((a, b) => a.time - b.time);
-            askedQuestions = new Set();
-
-            // ✅ (GRUPO 4) reset de estadística por video
-            stats = {
-              videoId: Number(videoNum),
-              score: 0,
-              answered: 0,
-              correct: 0,
-              wrong: 0,
-              clicks: 0
-            };
-            completedQuestions = new Set();
-            wrongAttemptsByQ = {};
-            updateScoreboard();
-            updateScoreDetails();
-            await logEvent('open_video', { videoId: stats.videoId });
-
-            // 2) Cargar YouTube API y crear/reusar player
-            await loadYouTubeAPI();
-
-            const playerDivId = 'youtube-player';
-
-            if (ytPlayer) {
-              ytPlayer.loadVideoById(videoId);
-            } else {
-              ytPlayer = new YT.Player(playerDivId, {
-                videoId: videoId,
-                playerVars: { autoplay: 1, rel: 0 },
-                events: {
-                  onReady: async () => {
-                    await logEvent('player_ready', { videoId: stats.videoId });
-                    startQuizWatcher();
-                  },
-                  onStateChange: async (e) => {
-                    // Puedes contar también play/pause como "clics" (eventos)
-                    if (e.data === YT.PlayerState.PLAYING) {
-                      await logEvent('play', { videoId: stats.videoId });
-                      startQuizWatcher();
-                    }
-                    if (e.data === YT.PlayerState.PAUSED) {
-                      await logEvent('pause', { videoId: stats.videoId });
-                    }
-                    if (e.data === YT.PlayerState.ENDED) {
-                      await logEvent('ended', { videoId: stats.videoId });
-                      stopQuizWatcher();
-                      await saveVideoSummary();
-                    }
-                  }
-                }
-              });
-            }
-
-            // 3) Mostrar reproductor
-            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
-            videoPlayer.style.display = 'block';
-            videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-            // 4) Iniciar vigilancia de preguntas
-            startQuizWatcher();
+            await openVideo(videoNum);
           });
         });
 
+        // Botón cerrar reproductor
         document.getElementById('close-video').addEventListener('click', async () => {
           const videoPlayer = document.getElementById('video-player');
-
           stopQuizWatcher();
-
-          const overlay = document.getElementById('quiz-overlay');
-          if (overlay) overlay.style.display = 'none';
+          setOverlayVisible(false);
+          showEndModal(false);
 
           if (ytPlayer) {
             try { ytPlayer.stopVideo(); } catch {}
           }
 
-          // ✅ (GRUPO 4) guardar resumen final + evento
-          await logEvent('close_video', { videoId: stats.videoId });
-          await saveVideoSummary();
+          // si estaba en progreso, lo marcamos cerrado
+          if (stats?.attemptId) {
+            stats.endedAt = stats.endedAt || isoNow();
+            await logEvent('close_video', { videoId: stats.videoId });
+            await saveAttemptSummary('closed');
+          }
 
           videoPlayer.style.display = 'none';
+          attemptPhase = 'idle';
+        });
+
+        // Acciones del modal final
+        document.addEventListener('click', async (e) => {
+          if (e.target?.id === 'btn-end-close') {
+            showEndModal(false);
+            return;
+          }
+
+          if (e.target?.id === 'btn-review-wrong') {
+            showEndModal(false);
+            await logEvent('start_review', { mode: 'wrong_only' });
+            startReview('wrong_only');
+            return;
+          }
+
+          if (e.target?.id === 'btn-review-all') {
+            showEndModal(false);
+            await logEvent('start_review', { mode: 'all' });
+            startReview('all');
+            return;
+          }
+
+          if (e.target?.id === 'btn-retry-video') {
+            showEndModal(false);
+            // repetir video => NUEVO INTENTO
+            const vid = stats.videoId;
+            await logEvent('retry_video_new_attempt', { videoId: vid });
+
+            // reinicia player desde 0 y crea attempt nuevo
+            await openVideo(vid);
+            return;
+          }
         });
 
       } catch (error) {
