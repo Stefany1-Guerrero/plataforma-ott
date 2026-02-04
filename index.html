@@ -2,200 +2,164 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plataforma OTT - Firebase</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
+
 <body>
   <div id="root"></div>
 
   <script type="module">
+    /***********************
+     * 1) CONFIG + HELPERS
+     ***********************/
     let currentUser = null;
 
-    // ✅ content.json
-    const CONTENT_URL = 'https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json';
+    // ✅ Tu JSON (videos + preguntas + time)
+    const CONTENT_URL =
+      "https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json";
 
     let contentCache = null;
     async function loadContent() {
       if (contentCache) return contentCache;
-      const res = await fetch(CONTENT_URL, { cache: 'no-store' });
-      if (!res.ok) throw new Error('No se pudo cargar content.json');
+      const res = await fetch(CONTENT_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error("No se pudo cargar content.json");
       contentCache = await res.json();
       return contentCache;
     }
 
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import {
       getAuth,
       createUserWithEmailAndPassword,
       signInWithEmailAndPassword,
       onAuthStateChanged,
-      signOut
-    } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+      signOut,
+    } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
     import {
       getFirestore,
       doc,
       setDoc,
       getDoc,
+      updateDoc,
       collection,
       addDoc,
-      updateDoc
-    } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+      getDocs,
+      query,
+      orderBy,
+      limit,
+    } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    // ===== YouTube IFrame API + Quiz state =====
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCu-GYKblx8v94XMLeIEbpwpxJjxmihyaE",
+      authDomain: "plataforma-ott.firebaseapp.com",
+      projectId: "plataforma-ott",
+      storageBucket: "plataforma-ott.firebasestorage.app",
+      messagingSenderId: "623885901425",
+      appId: "1:623885901425:web:d3fa5079d942eb064a05d0",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    function isoNow() {
+      return new Date().toISOString();
+    }
+
+    function showMessage(type, text) {
+      const messageDiv = document.getElementById("message");
+      if (!messageDiv) return;
+
+      messageDiv.className = `flex items-center gap-2 p-4 rounded-lg mb-6 ${
+        type === "error"
+          ? "bg-red-500/20 border border-red-500/50"
+          : "bg-green-500/20 border border-green-500/50"
+      }`;
+      messageDiv.innerHTML = `
+        <span class="text-2xl">${type === "error" ? "⚠️" : "✅"}</span>
+        <span class="${type === "error" ? "text-red-300" : "text-green-300"}">${text}</span>
+      `;
+      messageDiv.style.display = "flex";
+
+      if (type === "success") {
+        setTimeout(() => (messageDiv.style.display = "none"), 2500);
+      }
+    }
+
+    /**************************************
+     * 2) YOUTUBE PLAYER + QUIZ (CORE)
+     **************************************/
     let ytPlayer = null;
     let quizInterval = null;
 
-    // video actual del JSON
+    // Datos del video actual
     let currentVideoObj = null;
     let currentQuestions = [];
-    let askedQuestions = new Set();
+    let askedQuestions = new Set(); // evita disparar misma pregunta 2 veces durante reproducción
 
-    // ========= NUEVO MODELO DE INTENTOS (TABLA) =========
-    // Cada vez que abres un video => se crea un "attempt" nuevo (fila) en:
-    // users/{uid}/attempts/{attemptId}
-    let attemptId = null;
-    let attemptPhase = 'idle'; // 'playback' | 'review' | 'ended' | 'idle'
+    // Intento actual (Firestore)
+    let currentAttemptId = null;
 
-    // Resumen del intento (se guarda por attemptId, no se sobreescribe por videoId)
+    // Estado por pregunta (para el método nuevo)
+    // questionState[qid] = { seen, firstSelectedIndex, firstCorrect, finalSelectedIndex, finalCorrect, wrongAttempts }
+    let questionState = {};
+
+    // Score (se calcula por "finalCorrect" al terminar/revisar)
     let stats = {
       videoId: null,
-      attemptId: null,
-      startedAt: null,
-      endedAt: null,
-
-      // Playback (durante video)
-      playbackAnswered: 0,     // preguntas respondidas durante el video (1 intento por pregunta)
-      playbackCorrect: 0,
-      playbackWrong: 0,
+      score: 0,      // = #preguntas finalCorrect true
+      answered: 0,   // preguntas con finalSelectedIndex != null
+      correct: 0,    // = score
+      wrong: 0,      // total intentos incorrectos (playback + review)
       clicks: 0,
-
-      // Review (al final)
-      reviewAnswered: 0,       // preguntas completadas en repaso (cuando aciertas)
-      reviewCorrect: 0,
-      reviewWrong: 0,
-      score: 0
     };
 
-    // Estado por pregunta (durante reproducción)
-    // qState[qid] = { playback: { answered, isCorrect, selectedIndex }, review: { completed, wrongAttempts } }
-    let qState = {};
+    // Modo revisión final
+    let reviewMode = null;     // "wrong" | "all" | null
+    let reviewQueue = [];      // array de preguntas a revisar
+    let reviewIndex = 0;
 
-    function isoNow() { return new Date().toISOString(); }
+    function calcAccuracy() {
+      const total = currentQuestions.length || 0;
+      return total ? Math.round((stats.score / total) * 100) : 0;
+    }
 
-    function calcAccuracyReview() {
-      return stats.reviewAnswered ? Math.round((stats.reviewCorrect / stats.reviewAnswered) * 100) : 0;
+    function recomputeStatsFromState() {
+      const qs = Object.values(questionState);
+      const totalWrong = qs.reduce((acc, q) => acc + (q.wrongAttempts || 0), 0);
+      const answered = qs.filter((q) => q.finalSelectedIndex !== null && q.finalSelectedIndex !== undefined).length;
+      const score = qs.filter((q) => q.finalCorrect === true).length;
+
+      stats.score = score;
+      stats.correct = score;
+      stats.answered = answered;
+      stats.wrong = totalWrong;
+
+      updateScoreboard();
+      updateScoreDetails();
     }
 
     function updateScoreboard() {
-      const el = document.getElementById('scoreboard');
+      const el = document.getElementById("scoreboard");
       if (!el) return;
-      // Durante el video mostramos progreso, no puntaje.
-      if (attemptPhase === 'playback') {
-        el.textContent = `Progreso: ${stats.playbackAnswered}/${currentQuestions.length} | Aciertos: ${stats.playbackCorrect} | Fallos: ${stats.playbackWrong}`;
-        return;
-      }
-      // En repaso/fin mostramos puntaje real
-      el.textContent = `Puntaje: ${stats.score} | Repaso completadas: ${stats.reviewAnswered}/${currentQuestions.length}`;
+      el.textContent = `Puntaje: ${stats.score} | Respondidas: ${stats.answered}`;
     }
 
     function updateScoreDetails() {
-      const el = document.getElementById('score-details');
+      const el = document.getElementById("score-details");
       if (!el) return;
-
-      if (attemptPhase === 'playback') {
-        el.textContent = `Clics: ${stats.clicks} | (En reproducción no hay reintentos: si fallas, continúa el video)`;
-        return;
-      }
-
-      el.textContent = `Repaso → Aciertos: ${stats.reviewCorrect} | Errores: ${stats.reviewWrong} | %: ${calcAccuracyReview()}% | Clics: ${stats.clicks}`;
+      el.textContent = `Aciertos: ${stats.correct} | Errores: ${stats.wrong} | %: ${calcAccuracy()}% | Clics: ${stats.clicks}`;
     }
 
-    async function logEvent(type, extra = {}) {
-      if (!currentUser) return;
-      try {
-        await addDoc(collection(db, 'users', currentUser.uid, 'events'), {
-          type,
-          videoId: stats.videoId,
-          attemptId: stats.attemptId,
-          phase: attemptPhase,
-          ...extra,
-          createdAt: isoNow(),
-        });
-      } catch (e) {
-        console.warn('No se pudo guardar evento', e);
-      }
-    }
-
-    async function createAttempt(videoId) {
-      if (!currentUser) return null;
-      try {
-        const ref = await addDoc(collection(db, 'users', currentUser.uid, 'attempts'), {
-          videoId,
-          startedAt: isoNow(),
-          status: 'in_progress'
-        });
-        return ref.id;
-      } catch (e) {
-        console.warn('No se pudo crear attempt', e);
-        return null;
-      }
-    }
-
-    async function saveAttemptSummary(finalStatus = 'finished') {
-      if (!currentUser || !stats.attemptId) return;
-      try {
-        const attemptRef = doc(db, 'users', currentUser.uid, 'attempts', stats.attemptId);
-        await updateDoc(attemptRef, {
-          videoId: stats.videoId,
-          startedAt: stats.startedAt,
-          endedAt: stats.endedAt || null,
-          status: finalStatus,
-
-          playbackAnswered: stats.playbackAnswered,
-          playbackCorrect: stats.playbackCorrect,
-          playbackWrong: stats.playbackWrong,
-          clicks: stats.clicks,
-
-          reviewAnswered: stats.reviewAnswered,
-          reviewCorrect: stats.reviewCorrect,
-          reviewWrong: stats.reviewWrong,
-          score: stats.score,
-          accuracyReview: stats.reviewAnswered ? (stats.reviewCorrect / stats.reviewAnswered) : 0,
-
-          updatedAt: isoNow()
-        });
-      } catch (e) {
-        console.warn('No se pudo guardar resumen del attempt', e);
-      }
-    }
-
-    async function saveAnswerRow({ questionId, timeInVideo, selectedIndex, isCorrect, phase, wrongAttemptsInReview = 0 }) {
-      if (!currentUser || !stats.attemptId) return;
-      try {
-        // Guardamos “filas” de respuestas bajo el attempt (más limpio para tu tabla)
-        await addDoc(collection(db, 'users', currentUser.uid, 'attempts', stats.attemptId, 'answers'), {
-          videoId: stats.videoId,
-          attemptId: stats.attemptId,
-          questionId,
-          timeInVideo,
-          selectedIndex,
-          isCorrect,
-          phase, // 'playback' o 'review'
-          wrongAttemptsInReview,
-          createdAt: isoNow()
-        });
-      } catch (e) {
-        console.warn('No se pudo guardar respuesta', e);
-      }
-    }
-
-    // ========= YouTube helpers =========
+    // YouTube API loader
     function loadYouTubeAPI() {
       return new Promise((resolve) => {
         if (window.YT && window.YT.Player) return resolve();
-        const tag = document.createElement('script');
+        const tag = document.createElement("script");
         tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
         window.onYouTubeIframeAPIReady = () => resolve();
@@ -207,17 +171,13 @@
       quizInterval = null;
     }
 
+    // ✅ Watcher durante reproducción: dispara pregunta en el segundo exacto
     function startQuizWatcher() {
       stopQuizWatcher();
-
       quizInterval = setInterval(() => {
         if (!ytPlayer || !currentQuestions.length) return;
-        if (attemptPhase !== 'playback') return;
-
         const t = Math.floor(ytPlayer.getCurrentTime());
-
-        // pregunta exacta en ese segundo (si quieres más tolerancia, se cambia a rango)
-        const q = currentQuestions.find(q => q.time === t && !askedQuestions.has(q.id));
+        const q = currentQuestions.find((q) => q.time === t && !askedQuestions.has(q.id));
         if (q) {
           askedQuestions.add(q.id);
           showQuizPlayback(q);
@@ -225,96 +185,172 @@
       }, 500);
     }
 
-    function setOverlayVisible(show) {
-      const overlay = document.getElementById('quiz-overlay');
-      if (!overlay) return;
-      overlay.style.display = show ? 'flex' : 'none';
-    }
-
-    function disableOptionButtons() {
-      const optsEl = document.getElementById('quiz-options');
-      if (!optsEl) return;
-      optsEl.querySelectorAll('button').forEach(b => {
-        b.disabled = true;
-        b.classList.add('opacity-60', 'cursor-not-allowed');
+    /**************************************
+     * 3) FIRESTORE: ATTEMPTS + ANSWERS
+     **************************************/
+    async function createAttemptDoc(videoId, videoTitle) {
+      if (!currentUser) return null;
+      const ref = await addDoc(collection(db, "users", currentUser.uid, "attempts"), {
+        videoId,
+        videoTitle,
+        startedAt: isoNow(),
+        finishedAt: null,
+        score: 0,
+        answered: 0,
+        correct: 0,
+        wrong: 0,
+        clicks: 0,
+        accuracy: 0,
       });
+      return ref.id;
     }
 
-    // ========= NUEVO: DURANTE VIDEO (1 intento y SIGUE) =========
-    function showQuizPlayback(q) {
-      try { ytPlayer.pauseVideo(); } catch {}
+    async function saveAnswerDoc({ mode, questionId, selectedIndex, correct, timeInVideo }) {
+      if (!currentUser || !currentAttemptId) return;
+      try {
+        await addDoc(collection(db, "users", currentUser.uid, "attempts", currentAttemptId, "answers"), {
+          mode, // "playback" | "review"
+          questionId,
+          selectedIndex,
+          correct,
+          timeInVideo,
+          createdAt: isoNow(),
+        });
+      } catch (e) {
+        console.warn("No se pudo guardar answer", e);
+      }
+    }
 
-      const qEl = document.getElementById('quiz-question');
-      const optsEl = document.getElementById('quiz-options');
-      const fbEl = document.getElementById('quiz-feedback');
-      const btnContinue = document.getElementById('quiz-continue');
+    async function saveAttemptSummary() {
+      if (!currentUser || !currentAttemptId) return;
+      try {
+        await updateDoc(doc(db, "users", currentUser.uid, "attempts", currentAttemptId), {
+          finishedAt: null, // se pone al final real
+          score: stats.score,
+          answered: stats.answered,
+          correct: stats.correct,
+          wrong: stats.wrong,
+          clicks: stats.clicks,
+          accuracy: (currentQuestions.length ? stats.score / currentQuestions.length : 0),
+          updatedAt: isoNow(),
+        });
+      } catch (e) {
+        console.warn("No se pudo guardar resumen", e);
+      }
+    }
 
-      qEl.textContent = q.question;
-      fbEl.textContent = 'Selecciona una opción (si fallas, se registrará y el video continuará).';
-      fbEl.className = "text-sm mt-3 text-gray-300";
-      btnContinue.style.display = 'none';
-      optsEl.innerHTML = '';
+    async function closeAttemptSummary() {
+      if (!currentUser || !currentAttemptId) return;
+      try {
+        await updateDoc(doc(db, "users", currentUser.uid, "attempts", currentAttemptId), {
+          finishedAt: isoNow(),
+          score: stats.score,
+          answered: stats.answered,
+          correct: stats.correct,
+          wrong: stats.wrong,
+          clicks: stats.clicks,
+          accuracy: (currentQuestions.length ? stats.score / currentQuestions.length : 0),
+          updatedAt: isoNow(),
+        });
+      } catch (e) {
+        console.warn("No se pudo cerrar resumen", e);
+      }
+    }
 
-      // asegurar estado
-      if (!qState[q.id]) {
-        qState[q.id] = {
-          playback: { answered: false, isCorrect: false, selectedIndex: null },
-          review: { completed: false, wrongAttempts: 0 }
+    /*************************************************************
+     * 4) MÉTODO NUEVO: PLAYBACK = 1 intento, si falla sigue video
+     *************************************************************/
+    function initQuestionState() {
+      questionState = {};
+      for (const q of currentQuestions) {
+        questionState[q.id] = {
+          seen: false,
+          firstSelectedIndex: null,
+          firstCorrect: null,
+          finalSelectedIndex: null,
+          finalCorrect: false,
+          wrongAttempts: 0,
         };
       }
+      recomputeStatsFromState();
+    }
+
+    function showQuizPlayback(q) {
+      // pausa video
+      try { ytPlayer.pauseVideo(); } catch {}
+
+      const overlay = document.getElementById("quiz-overlay");
+      const qEl = document.getElementById("quiz-question");
+      const optsEl = document.getElementById("quiz-options");
+      const fbEl = document.getElementById("quiz-feedback");
+      const btnContinue = document.getElementById("quiz-continue");
+
+      // UI
+      qEl.textContent = q.question;
+      fbEl.textContent = "Responde (solo 1 intento).";
+      fbEl.className = "text-sm mt-3 text-gray-300";
+      btnContinue.style.display = "none"; // ✅ ya no se usa en playback
+      btnContinue.onclick = null;
+
+      optsEl.innerHTML = "";
+
+      let answeredNow = false;
 
       q.options.forEach((opt, idx) => {
-        const btn = document.createElement('button');
-        btn.className = "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
+        const btn = document.createElement("button");
+        btn.className =
+          "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
         btn.textContent = opt;
 
-        btn.addEventListener('click', async () => {
-          // 1) cuenta clic
-          stats.clicks += 1;
-          updateScoreDetails();
-          await logEvent('select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
+        btn.addEventListener("click", async () => {
+          if (answeredNow) return;
+          answeredNow = true;
 
-          // 2) evita reintentos en playback
-          disableOptionButtons();
+          // disable buttons
+          [...optsEl.querySelectorAll("button")].forEach((b) => {
+            b.disabled = true;
+            b.classList.add("opacity-60", "cursor-not-allowed");
+          });
+
+          stats.clicks += 1;
+
+          const st = questionState[q.id];
+          st.seen = true;
 
           const isCorrect = idx === q.correctIndex;
 
-          // marcar respuesta de playback solo una vez
-          if (!qState[q.id].playback.answered) {
-            qState[q.id].playback.answered = true;
-            qState[q.id].playback.selectedIndex = idx;
-            qState[q.id].playback.isCorrect = isCorrect;
+          // Solo 1 intento: se guarda primera respuesta y se fija final por ahora
+          st.firstSelectedIndex = idx;
+          st.firstCorrect = isCorrect;
 
-            stats.playbackAnswered += 1;
-            if (isCorrect) stats.playbackCorrect += 1;
-            else stats.playbackWrong += 1;
-
-            updateScoreboard();
-            updateScoreDetails();
-
-            await saveAnswerRow({
-              questionId: q.id,
-              timeInVideo: q.time,
-              selectedIndex: idx,
-              isCorrect,
-              phase: 'playback'
-            });
-
-            await saveAttemptSummary('in_progress');
-          }
-
-          // feedback corto y continuar SOLO
+          // Si fue correcta, cuenta como finalCorrect
           if (isCorrect) {
-            fbEl.textContent = `✅ Correcto. Continuando...`;
+            st.finalSelectedIndex = idx;
+            st.finalCorrect = true;
+            fbEl.textContent = `✅ Correcto. El video continúa…`;
             fbEl.className = "text-sm mt-3 text-green-300";
           } else {
-            fbEl.textContent = `❌ Incorrecto. Se registró el fallo. Continuando...`;
+            st.finalSelectedIndex = idx;   // queda registrada como final (pero podrá cambiar en revisión)
+            st.finalCorrect = false;
+            st.wrongAttempts += 1;
+            fbEl.textContent = `❌ Incorrecto. Registrado. El video continúa…`;
             fbEl.className = "text-sm mt-3 text-red-300";
           }
 
-          setTimeout(async () => {
-            setOverlayVisible(false);
-            await logEvent('resume_after_answer', { questionId: q.id, timeInVideo: q.time, isCorrect });
+          await saveAnswerDoc({
+            mode: "playback",
+            questionId: q.id,
+            selectedIndex: idx,
+            correct: isCorrect,
+            timeInVideo: q.time
+          });
+
+          recomputeStatsFromState();
+          await saveAttemptSummary();
+
+          // cerrar overlay y seguir
+          setTimeout(() => {
+            overlay.style.display = "none";
             try { ytPlayer.playVideo(); } catch {}
           }, 900);
         });
@@ -322,210 +358,263 @@
         optsEl.appendChild(btn);
       });
 
-      setOverlayVisible(true);
+      overlay.style.display = "flex";
     }
 
-    // ========= NUEVO: REPASO AL FINAL (aquí sí reintentas hasta acertar) =========
-    let reviewQueue = [];
-    let reviewIndex = 0;
+    /*************************************************************
+     * 5) REVISIÓN AL FINAL: puedes repetir preguntas y ganar puntaje
+     *    - "Repasar incorrectas/no respondidas"
+     *    - "Repasar todas"
+     *************************************************************/
+    function buildReviewQueue(mode) {
+      const qs = currentQuestions.slice();
+      if (mode === "all") return qs;
 
-    function buildReviewQueue(mode = 'wrong_only') {
-      // wrong_only: solo las que falló en playback
-      // all: todas
-      const all = currentQuestions.slice();
-      if (mode === 'all') return all;
-
-      return all.filter(q => {
-        const st = qState[q.id]?.playback;
-        // si no respondió durante el video, también entra al repaso
-        if (!st || !st.answered) return true;
-        return st.answered && !st.isCorrect;
+      // wrong/unanswered:
+      return qs.filter((q) => {
+        const st = questionState[q.id];
+        const unanswered = st.finalSelectedIndex === null || st.finalSelectedIndex === undefined;
+        const wrong = st.finalCorrect === false;
+        return unanswered || wrong;
       });
     }
 
-    function startReview(mode = 'wrong_only') {
-      attemptPhase = 'review';
+    function startReview(mode) {
+      reviewMode = mode;
       reviewQueue = buildReviewQueue(mode);
       reviewIndex = 0;
 
-      updateScoreboard();
-      updateScoreDetails();
-
       if (!reviewQueue.length) {
-        showEndModal(true); // mostrar resultados igual
+        showEndSummaryMessage("✅ No hay preguntas pendientes para repasar.");
         return;
       }
+
+      hideEndModal();
       showReviewQuestion(reviewQueue[reviewIndex]);
     }
 
     function showReviewQuestion(q) {
-      // (video ya terminó o está pausado)
-      try { ytPlayer.pauseVideo(); } catch {}
+      const overlay = document.getElementById("quiz-overlay");
+      const qEl = document.getElementById("quiz-question");
+      const optsEl = document.getElementById("quiz-options");
+      const fbEl = document.getElementById("quiz-feedback");
+      const btnContinue = document.getElementById("quiz-continue");
 
-      const qEl = document.getElementById('quiz-question');
-      const optsEl = document.getElementById('quiz-options');
-      const fbEl = document.getElementById('quiz-feedback');
-      const btnContinue = document.getElementById('quiz-continue');
+      // En revisión NO dependemos del video
+      try {
+        ytPlayer.pauseVideo();
+        ytPlayer.seekTo(q.time, true);
+      } catch {}
 
-      if (!qState[q.id]) {
-        qState[q.id] = {
-          playback: { answered: false, isCorrect: false, selectedIndex: null },
-          review: { completed: false, wrongAttempts: 0 }
-        };
-      }
-
-      qEl.textContent = `REPASO (${reviewIndex + 1}/${reviewQueue.length}) → ${q.question}`;
-      fbEl.textContent = 'Responde hasta acertar. El puntaje se calcula aquí.';
+      qEl.textContent = q.question;
+      fbEl.textContent = "Modo repaso: puedes intentar hasta acertar para ganar el punto.";
       fbEl.className = "text-sm mt-3 text-gray-300";
-      btnContinue.style.display = 'none';
-      btnContinue.textContent = 'Siguiente';
-      optsEl.innerHTML = '';
+      btnContinue.style.display = "none";
+      btnContinue.onclick = null;
+
+      optsEl.innerHTML = "";
+
+      // en revisión puedes intentar varias veces hasta acertar
+      let isSolved = false;
 
       q.options.forEach((opt, idx) => {
-        const btn = document.createElement('button');
-        btn.className = "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
+        const btn = document.createElement("button");
+        btn.className =
+          "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
         btn.textContent = opt;
 
-        btn.addEventListener('click', async () => {
-          stats.clicks += 1;
-          updateScoreDetails();
-          await logEvent('review_select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
+        btn.addEventListener("click", async () => {
+          if (isSolved) return;
 
+          stats.clicks += 1;
+          const st = questionState[q.id];
           const isCorrect = idx === q.correctIndex;
 
+          await saveAnswerDoc({
+            mode: "review",
+            questionId: q.id,
+            selectedIndex: idx,
+            correct: isCorrect,
+            timeInVideo: q.time
+          });
+
           if (isCorrect) {
-            fbEl.textContent = `✅ Correcto. ${q.explanation || ''}`;
-            fbEl.className = "text-sm mt-3 text-green-300";
-
-            // contar solo primera vez que completa en repaso
-            if (!qState[q.id].review.completed) {
-              qState[q.id].review.completed = true;
-
-              stats.reviewCorrect += 1;
-              stats.reviewAnswered += 1;
-              stats.score += 1; // 1 punto por pregunta completada en repaso
-
-              // guardar fila de respuesta en repaso
-              await saveAnswerRow({
-                questionId: q.id,
-                timeInVideo: q.time,
-                selectedIndex: idx,
-                isCorrect: true,
-                phase: 'review',
-                wrongAttemptsInReview: qState[q.id].review.wrongAttempts
-              });
-
-              await saveAttemptSummary('in_progress');
+            // si antes estaba incorrecta, ahora gana punto
+            st.finalSelectedIndex = idx;
+            if (st.finalCorrect !== true) {
+              st.finalCorrect = true;
             }
+            fbEl.textContent = `✅ Correcto.`;
+            fbEl.className = "text-sm mt-3 text-green-300";
+            isSolved = true;
 
-            // habilitar "Siguiente"
-            btnContinue.style.display = 'inline-flex';
+            // deshabilita opciones y muestra botón siguiente
+            [...optsEl.querySelectorAll("button")].forEach((b) => {
+              b.disabled = true;
+              b.classList.add("opacity-60", "cursor-not-allowed");
+            });
+
+            btnContinue.style.display = "inline-flex";
+            btnContinue.textContent = (reviewIndex < reviewQueue.length - 1) ? "Siguiente" : "Finalizar repaso";
             btnContinue.onclick = async () => {
+              btnContinue.style.display = "none";
+              overlay.style.display = "none";
+
+              recomputeStatsFromState();
+              await saveAttemptSummary();
+
               reviewIndex += 1;
               if (reviewIndex >= reviewQueue.length) {
-                setOverlayVisible(false);
-                await logEvent('review_finished');
-                showEndModal(true);
-                return;
+                showEndModal(); // volver al final
+              } else {
+                showReviewQuestion(reviewQueue[reviewIndex]);
               }
-              showReviewQuestion(reviewQueue[reviewIndex]);
             };
           } else {
-            fbEl.textContent = `❌ Incorrecto. Intenta otra vez.`;
+            st.wrongAttempts += 1;
+            fbEl.textContent = `❌ Incorrecto. Intenta otra vez (repaso).`;
             fbEl.className = "text-sm mt-3 text-red-300";
-
-            stats.reviewWrong += 1;
-            qState[q.id].review.wrongAttempts += 1;
-
-            updateScoreDetails();
-            await logEvent('review_wrong_attempt', { questionId: q.id, timeInVideo: q.time });
-
-            await saveAttemptSummary('in_progress');
+            recomputeStatsFromState();
+            await saveAttemptSummary();
           }
-
-          updateScoreboard();
-          updateScoreDetails();
         });
 
         optsEl.appendChild(btn);
       });
 
-      setOverlayVisible(true);
+      overlay.style.display = "flex";
     }
 
-    // ========= MODAL FINAL =========
-    function showEndModal(show) {
-      const modal = document.getElementById('end-modal');
-      if (!modal) return;
-      modal.style.display = show ? 'flex' : 'none';
-
-      const summary = document.getElementById('end-summary');
-      if (summary) {
-        const total = currentQuestions.length;
-        const wrongInPlayback = Object.values(qState).filter(s => s.playback?.answered && !s.playback.isCorrect).length;
-        const unansweredInPlayback = currentQuestions.filter(q => !qState[q.id]?.playback?.answered).length;
-
-        summary.innerHTML = `
-          <div class="text-sm text-gray-200 space-y-2">
-            <div><b>Video:</b> ${stats.videoId}</div>
-            <div><b>Attempt ID:</b> ${stats.attemptId || '-'}</div>
-            <hr class="border-white/10 my-2"/>
-            <div class="text-gray-300"><b>Durante video:</b> respondidas ${stats.playbackAnswered}/${total}, aciertos ${stats.playbackCorrect}, fallos ${stats.playbackWrong}</div>
-            <div class="text-gray-300"><b>Para repaso:</b> incorrectas ${wrongInPlayback}, no respondidas ${unansweredInPlayback}</div>
-            <hr class="border-white/10 my-2"/>
-            <div class="text-gray-100"><b>Puntaje repaso:</b> ${stats.score}</div>
-            <div class="text-gray-300"><b>Repaso:</b> completadas ${stats.reviewAnswered}/${total}, % ${calcAccuracyReview()}%</div>
-          </div>
-        `;
-      }
+    /*************************************************************
+     * 6) END MODAL: TABLA + BOTONES (lo que te faltaba)
+     *************************************************************/
+    function statusLabelFor(qid) {
+      const st = questionState[qid];
+      const unanswered = st.finalSelectedIndex === null || st.finalSelectedIndex === undefined;
+      if (unanswered) return { text: "No respondida", cls: "text-yellow-300" };
+      if (st.finalCorrect) return { text: "Correcta", cls: "text-green-300" };
+      return { text: "Incorrecta", cls: "text-red-300" };
     }
 
-    // Configuración de Firebase
-    const firebaseConfig = {
-      apiKey: "AIzaSyCu-GYKblx8v94XMLeIEbpwpxJjxmihyaE",
-      authDomain: "plataforma-ott.firebaseapp.com",
-      projectId: "plataforma-ott",
-      storageBucket: "plataforma-ott.firebasestorage.app",
-      messagingSenderId: "623885901425",
-      appId: "1:623885901425:web:d3fa5079d942eb064a05d0"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    function showMessage(type, text) {
-      const messageDiv = document.getElementById('message');
-      if (!messageDiv) return;
-
-      messageDiv.className = `flex items-center gap-2 p-4 rounded-lg mb-6 ${type === 'error' ? 'bg-red-500/20 border border-red-500/50' : 'bg-green-500/20 border border-green-500/50'}`;
-      messageDiv.innerHTML = `
-        <span class="text-2xl">${type === 'error' ? '⚠️' : '✅'}</span>
-        <span class="${type === 'error' ? 'text-red-300' : 'text-green-300'}">${text}</span>
+    function buildEndTableHTML() {
+      return `
+        <div class="mt-4 overflow-auto max-h-72 border border-white/10 rounded-xl">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-gray-900/90">
+              <tr class="text-gray-200">
+                <th class="text-left p-3">Pregunta</th>
+                <th class="text-left p-3">Estado</th>
+                <th class="text-left p-3">Errores</th>
+                <th class="text-left p-3">Tiempo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${currentQuestions.map((q) => {
+                const st = questionState[q.id];
+                const s = statusLabelFor(q.id);
+                return `
+                  <tr class="border-t border-white/10">
+                    <td class="p-3 text-gray-100">${q.question}</td>
+                    <td class="p-3 ${s.cls} font-semibold">${s.text}</td>
+                    <td class="p-3 text-gray-200">${st.wrongAttempts || 0}</td>
+                    <td class="p-3 text-gray-200">${q.time}s</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
       `;
-      messageDiv.style.display = 'flex';
-
-      if (type === 'success') {
-        setTimeout(() => { messageDiv.style.display = 'none'; }, 3000);
-      }
     }
 
+    function showEndSummaryMessage(msg) {
+      const el = document.getElementById("end-summary");
+      if (!el) return;
+      el.innerHTML = `<div class="text-sm text-gray-200">${msg}</div>`;
+    }
+
+    function showEndModal() {
+      const modal = document.getElementById("end-modal");
+      const summary = document.getElementById("end-summary");
+      if (!modal || !summary) return;
+
+      recomputeStatsFromState();
+
+      summary.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-gray-200">
+          <div><b>Video:</b> ${currentVideoObj?.title || `Video ${stats.videoId}`}</div>
+          <div><b>Intento:</b> ${currentAttemptId ? currentAttemptId.slice(0, 6) : "-"}</div>
+          <div><b>Puntaje:</b> ${stats.score} / ${currentQuestions.length}</div>
+          <div><b>Precisión:</b> ${calcAccuracy()}%</div>
+          <div><b>Respondidas:</b> ${stats.answered}</div>
+          <div><b>Errores (intentos):</b> ${stats.wrong}</div>
+          <div><b>Clics:</b> ${stats.clicks}</div>
+        </div>
+        ${buildEndTableHTML()}
+      `;
+
+      modal.style.display = "flex";
+
+      // wiring botones
+      const btnWrong = document.getElementById("btn-review-wrong");
+      const btnAll = document.getElementById("btn-review-all");
+      const btnRetry = document.getElementById("btn-retry-video");
+      const btnClose = document.getElementById("btn-end-close");
+
+      if (btnWrong) btnWrong.onclick = () => startReview("wrong");
+      if (btnAll) btnAll.onclick = () => startReview("all");
+      if (btnRetry) btnRetry.onclick = () => retryVideoNewAttempt();
+      if (btnClose) btnClose.onclick = () => hideEndModal();
+    }
+
+    function hideEndModal() {
+      const modal = document.getElementById("end-modal");
+      if (modal) modal.style.display = "none";
+    }
+
+    async function retryVideoNewAttempt() {
+      hideEndModal();
+
+      // Nuevo intento = nuevo doc
+      if (!currentVideoObj || !stats.videoId) return;
+      currentAttemptId = await createAttemptDoc(stats.videoId, currentVideoObj.title || `Video ${stats.videoId}`);
+
+      // Reset estructuras
+      askedQuestions = new Set();
+      initQuestionState();
+      stats.clicks = 0;
+      recomputeStatsFromState();
+      await saveAttemptSummary();
+
+      // reinicia video
+      try {
+        ytPlayer.stopVideo();
+        ytPlayer.loadVideoById(currentVideoObj.youtubeId);
+      } catch {}
+
+      // arranca watcher
+      startQuizWatcher();
+    }
+
+    /*************************************************************
+     * 7) AUTH: REGISTER / LOGIN / LOGOUT
+     *************************************************************/
     async function handleRegister() {
-      const name = document.getElementById('reg-name').value.trim();
-      const email = document.getElementById('reg-email').value.trim();
-      const password = document.getElementById('reg-password').value;
-      const confirmPassword = document.getElementById('reg-confirm').value;
+      const name = document.getElementById("reg-name").value.trim();
+      const email = document.getElementById("reg-email").value.trim();
+      const password = document.getElementById("reg-password").value;
+      const confirmPassword = document.getElementById("reg-confirm").value;
 
       if (!name || !email || !password || !confirmPassword) {
-        showMessage('error', 'Todos los campos son obligatorios');
+        showMessage("error", "Todos los campos son obligatorios");
         return;
       }
       if (password !== confirmPassword) {
-        showMessage('error', 'Las contraseñas no coinciden');
+        showMessage("error", "Las contraseñas no coinciden");
         return;
       }
       if (password.length < 6) {
-        showMessage('error', 'La contraseña debe tener al menos 6 caracteres');
+        showMessage("error", "La contraseña debe tener al menos 6 caracteres");
         return;
       }
 
@@ -533,76 +622,78 @@
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
 
-        await setDoc(doc(db, 'users', user.uid), {
+        await setDoc(doc(db, "users", user.uid), {
           name,
           email,
           createdAt: isoNow(),
-          subscription: 'basic'
+          subscription: "basic",
         });
 
-        showMessage('success', '¡Registro exitoso! Redirigiendo...');
+        showMessage("success", "¡Registro exitoso! Redirigiendo...");
         setTimeout(() => {
-          document.getElementById('reg-name').value = '';
-          document.getElementById('reg-email').value = '';
-          document.getElementById('reg-password').value = '';
-          document.getElementById('reg-confirm').value = '';
+          document.getElementById("reg-name").value = "";
+          document.getElementById("reg-email").value = "";
+          document.getElementById("reg-password").value = "";
+          document.getElementById("reg-confirm").value = "";
           switchToLogin();
-        }, 2000);
-
+        }, 1500);
       } catch (error) {
-        console.error('Error:', error);
-        let errorMessage = 'Error al registrar usuario';
-        if (error.code === 'auth/email-already-in-use') errorMessage = 'Este email ya está registrado';
-        else if (error.code === 'auth/invalid-email') errorMessage = 'Email inválido';
-        else if (error.code === 'auth/weak-password') errorMessage = 'La contraseña es muy débil';
-        showMessage('error', errorMessage);
+        console.error("Error:", error);
+        let errorMessage = "Error al registrar usuario";
+        if (error.code === "auth/email-already-in-use") errorMessage = "Este email ya está registrado";
+        if (error.code === "auth/invalid-email") errorMessage = "Email inválido";
+        if (error.code === "auth/weak-password") errorMessage = "La contraseña es muy débil";
+        showMessage("error", errorMessage);
       }
     }
 
     async function handleLogin() {
-      const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-password').value;
+      const email = document.getElementById("login-email").value.trim();
+      const password = document.getElementById("login-password").value;
 
       if (!email || !password) {
-        showMessage('error', 'Email y contraseña son obligatorios');
+        showMessage("error", "Email y contraseña son obligatorios");
         return;
       }
 
       try {
         await signInWithEmailAndPassword(auth, email, password);
-        showMessage('success', 'Iniciando sesión...');
+        showMessage("success", "Iniciando sesión...");
       } catch (error) {
-        console.error('Error:', error);
-        let errorMessage = 'Error al iniciar sesión';
-        if (error.code === 'auth/user-not-found') errorMessage = 'Usuario no encontrado';
-        else if (error.code === 'auth/wrong-password') errorMessage = 'Contraseña incorrecta';
-        else if (error.code === 'auth/invalid-credential') errorMessage = 'Email o contraseña incorrectos';
-        else if (error.code === 'auth/too-many-requests') errorMessage = 'Demasiados intentos. Intenta más tarde';
-        showMessage('error', errorMessage);
+        console.error("Error:", error);
+        let errorMessage = "Error al iniciar sesión";
+        if (error.code === "auth/user-not-found") errorMessage = "Usuario no encontrado";
+        if (error.code === "auth/wrong-password") errorMessage = "Contraseña incorrecta";
+        if (error.code === "auth/invalid-credential") errorMessage = "Email o contraseña incorrectos";
+        if (error.code === "auth/too-many-requests") errorMessage = "Demasiados intentos. Intenta más tarde";
+        showMessage("error", errorMessage);
       }
     }
 
     async function handleLogout() {
       try {
         await signOut(auth);
-        showMessage('success', 'Sesión cerrada exitosamente');
+        showMessage("success", "Sesión cerrada exitosamente");
       } catch (error) {
-        console.error('Error:', error);
-        showMessage('error', 'Error al cerrar sesión');
+        console.error("Error:", error);
+        showMessage("error", "Error al cerrar sesión");
       }
     }
 
+    /*************************************************************
+     * 8) UI: LOGIN PAGE
+     *************************************************************/
     function renderLoginPage() {
-      document.getElementById('root').innerHTML = `
+      document.getElementById("root").innerHTML = `
         <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
           <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-purple-500/20">
             <div class="text-center mb-8">
               <div class="text-6xl mb-4">🎬</div>
               <h1 class="text-4xl font-bold text-white mb-2">Plataforma OTT</h1>
-              <p class="text-gray-400">Con Firebase Database 🔥</p>
+              <p class="text-gray-400">Con Firebase Firestore 🔥</p>
             </div>
 
-            <div id="message" style="display: none;"></div>
+            <div id="message" style="display:none;"></div>
 
             <div class="flex gap-2 mb-6 bg-gray-700/30 p-1 rounded-lg">
               <button id="btn-login-tab" class="flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white">
@@ -625,13 +716,14 @@
                   <input type="password" id="login-password" placeholder="••••••••"
                     class="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all">
                 </div>
-                <button id="btn-login" class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
+                <button id="btn-login"
+                  class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
                   Iniciar Sesión
                 </button>
               </div>
             </div>
 
-            <div id="register-form" style="display: none;">
+            <div id="register-form" style="display:none;">
               <div class="space-y-4">
                 <div>
                   <label class="block text-gray-300 mb-2 text-sm">👤 Nombre Completo</label>
@@ -653,7 +745,8 @@
                   <input type="password" id="reg-confirm" placeholder="••••••••"
                     class="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all">
                 </div>
-                <button id="btn-register" class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
+                <button id="btn-register"
+                  class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
                   Crear Cuenta
                 </button>
               </div>
@@ -662,38 +755,45 @@
         </div>
       `;
 
-      document.getElementById('btn-login-tab').addEventListener('click', switchToLogin);
-      document.getElementById('btn-register-tab').addEventListener('click', switchToRegister);
-      document.getElementById('btn-login').addEventListener('click', handleLogin);
-      document.getElementById('btn-register').addEventListener('click', handleRegister);
+      document.getElementById("btn-login-tab").addEventListener("click", switchToLogin);
+      document.getElementById("btn-register-tab").addEventListener("click", switchToRegister);
+      document.getElementById("btn-login").addEventListener("click", handleLogin);
+      document.getElementById("btn-register").addEventListener("click", handleRegister);
     }
 
     function switchToLogin() {
-      document.getElementById('login-form').style.display = 'block';
-      document.getElementById('register-form').style.display = 'none';
-      document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-      document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-      const messageDiv = document.getElementById('message');
-      if (messageDiv) messageDiv.style.display = 'none';
+      document.getElementById("login-form").style.display = "block";
+      document.getElementById("register-form").style.display = "none";
+      document.getElementById("btn-login-tab").className =
+        "flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white";
+      document.getElementById("btn-register-tab").className =
+        "flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white";
+      const messageDiv = document.getElementById("message");
+      if (messageDiv) messageDiv.style.display = "none";
     }
 
     function switchToRegister() {
-      document.getElementById('login-form').style.display = 'none';
-      document.getElementById('register-form').style.display = 'block';
-      document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
-      document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
-      const messageDiv = document.getElementById('message');
-      if (messageDiv) messageDiv.style.display = 'none';
+      document.getElementById("login-form").style.display = "none";
+      document.getElementById("register-form").style.display = "block";
+      document.getElementById("btn-login-tab").className =
+        "flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white";
+      document.getElementById("btn-register-tab").className =
+        "flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white";
+      const messageDiv = document.getElementById("message");
+      if (messageDiv) messageDiv.style.display = "none";
     }
 
+    /*************************************************************
+     * 9) UI: DASHBOARD + PLAYER + MODALS
+     *************************************************************/
     async function renderDashboard(user) {
       try {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userDoc = await getDoc(doc(db, "users", user.uid));
         const userData = userDoc.data();
 
-        document.getElementById('root').innerHTML = `
+        document.getElementById("root").innerHTML = `
           <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
-            <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-4xl border border-purple-500/20">
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-5xl border border-purple-500/20">
               <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
                 <h1 class="text-3xl font-bold text-white">🎬 Mi Plataforma OTT</h1>
                 <button id="btn-logout" class="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -701,15 +801,15 @@
                 </button>
               </div>
 
-              <div id="message" style="display: none;"></div>
+              <div id="message" style="display:none;"></div>
 
               <div class="bg-gray-700/30 rounded-xl p-6 mb-6">
-                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData?.name || 'Usuario'}! 👋</h2>
+                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData?.name || "Usuario"}! 👋</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300">
                   <p>📧 Email: ${userData?.email || user.email}</p>
-                  <p>💎 Plan: ${(userData?.subscription || 'basic').toUpperCase()}</p>
+                  <p>💎 Plan: ${(userData?.subscription || "basic").toUpperCase()}</p>
                   <p>✅ Estado: Activo</p>
-                  <p>📅 Miembro desde: ${userData?.createdAt ? new Date(userData.createdAt).toLocaleDateString() : '-'}</p>
+                  <p>📅 Miembro desde: ${userData?.createdAt ? new Date(userData.createdAt).toLocaleDateString() : "-"}</p>
                   <p>🔥 Base de datos: Firebase Firestore</p>
                   <p>🔒 Seguridad: Activada</p>
                 </div>
@@ -724,15 +824,16 @@
                     <button class="video-btn bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer" data-video="${num}">
                       <p class="text-white font-medium text-sm md:text-base">🎬 Video ${num}</p>
                     </button>
-                  `).join('')}
+                  `).join("")}
                 </div>
 
-                <div id="video-player" style="display: none;" class="mt-6">
+                <div id="video-player" style="display:none;" class="mt-6">
                   <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
                     <div>
                       <h4 class="text-lg font-semibold text-white" id="video-title"></h4>
-                      <div class="text-sm text-gray-200 mt-1" id="scoreboard">Progreso: 0/0 | Aciertos: 0 | Fallos: 0</div>
-                      <div class="text-xs text-gray-300 mt-1" id="score-details">Clics: 0</div>
+                      <div class="text-sm text-gray-200 mt-1" id="scoreboard">Puntaje: 0 | Respondidas: 0</div>
+                      <div class="text-xs text-gray-300 mt-1" id="score-details">Aciertos: 0 | Errores: 0 | %: 0% | Clics: 0</div>
+                      <div class="text-xs text-gray-400 mt-1" id="attempt-id"></div>
                     </div>
 
                     <button id="close-video" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -740,56 +841,58 @@
                     </button>
                   </div>
 
-                  <div class="relative" style="padding-bottom: 56.25%; height: 0;">
-                    <div class="relative" style="padding-bottom: 56.25%; height: 0;">
-                      <div id="youtube-player" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
+                  <div class="relative" style="padding-bottom:56.25%; height:0;">
+                    <!-- Player -->
+                    <div id="youtube-player" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
 
-                      <div id="quiz-overlay"
-                        style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"
-                        class="bg-black/70 flex items-center justify-center p-4">
-                        <div class="w-full max-w-xl bg-gray-800 rounded-xl border border-purple-500/30 p-5">
-                          <h4 id="quiz-question" class="text-white text-lg font-semibold mb-4"></h4>
-                          <div id="quiz-options" class="grid grid-cols-1 gap-2"></div>
-                          <p id="quiz-feedback" class="text-sm mt-3 text-gray-300"></p>
+                    <!-- Quiz overlay -->
+                    <div id="quiz-overlay"
+                      style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:50;"
+                      class="bg-black/70 flex items-center justify-center p-4">
+                      <div class="w-full max-w-xl bg-gray-800 rounded-xl border border-purple-500/30 p-5">
+                        <h4 id="quiz-question" class="text-white text-lg font-semibold mb-4"></h4>
+                        <div id="quiz-options" class="grid grid-cols-1 gap-2"></div>
+                        <p id="quiz-feedback" class="text-sm mt-3 text-gray-300"></p>
 
-                          <div class="flex justify-end gap-2 mt-4">
-                            <button id="quiz-continue"
-                              class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
-                              style="display:none;">
-                              Continuar
-                            </button>
-                          </div>
+                        <div class="flex justify-end gap-2 mt-4">
+                          <button id="quiz-continue"
+                            class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                            style="display:none;">
+                            Continuar
+                          </button>
                         </div>
                       </div>
+                    </div>
 
-                      <!-- Modal final -->
-                      <div id="end-modal" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"
-                        class="bg-black/70 flex items-center justify-center p-4">
-                        <div class="w-full max-w-2xl bg-gray-900 rounded-2xl border border-purple-500/30 p-6">
-                          <h3 class="text-white text-xl font-bold mb-3">✅ Video finalizado — Resultados del intento</h3>
-                          <div id="end-summary" class="mb-4"></div>
+                    <!-- End modal -->
+                    <div id="end-modal"
+                      style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:60;"
+                      class="bg-black/70 flex items-center justify-center p-4">
+                      <div class="w-full max-w-3xl bg-gray-900 rounded-2xl border border-purple-500/30 p-6">
+                        <h3 class="text-white text-xl font-bold mb-3">✅ Video finalizado — Resultados del intento</h3>
 
-                          <div class="flex flex-wrap gap-2 justify-end">
-                            <button id="btn-review-wrong" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
-                              Repasar incorrectas/no respondidas
-                            </button>
-                            <button id="btn-review-all" class="px-4 py-2 bg-purple-600/70 hover:bg-purple-700 text-white rounded-lg">
-                              Repasar todas
-                            </button>
-                            <button id="btn-retry-video" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
-                              Repetir video (nuevo intento)
-                            </button>
-                            <button id="btn-end-close" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg">
-                              Cerrar
-                            </button>
-                          </div>
+                        <div id="end-summary" class="mb-4"></div>
 
-                          <p class="text-xs text-gray-400 mt-4">
-                            Cada vez que repites el video se crea un nuevo intento (fila) en Firestore: <b>users/{uid}/attempts</b>.
-                          </p>
+                        <div class="flex flex-wrap gap-2 justify-end">
+                          <button id="btn-review-wrong" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
+                            Repasar incorrectas/no respondidas
+                          </button>
+                          <button id="btn-review-all" class="px-4 py-2 bg-purple-600/70 hover:bg-purple-700 text-white rounded-lg">
+                            Repasar todas
+                          </button>
+                          <button id="btn-retry-video" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
+                            Repetir video (nuevo intento)
+                          </button>
+                          <button id="btn-end-close" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg">
+                            Cerrar
+                          </button>
                         </div>
-                      </div>
 
+                        <p class="text-xs text-gray-400 mt-4">
+                          Cada vez que repites el video se crea un nuevo intento (documento) en Firestore:
+                          <b>users/{uid}/attempts/{attemptId}</b>
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -799,176 +902,103 @@
           </div>
         `;
 
-        document.getElementById('btn-logout').addEventListener('click', handleLogout);
+        document.getElementById("btn-logout").addEventListener("click", handleLogout);
 
         const data = await loadContent();
 
+        // Mapa videos desde JSON
         const videoLinks = {};
         const videoTitles = {};
-        data.videos.forEach(v => {
+        data.videos.forEach((v) => {
           videoLinks[String(v.id)] = v.youtubeId;
           videoTitles[String(v.id)] = v.title || `Video ${v.id}`;
         });
 
-        async function openVideo(videoNum) {
-          const videoId = videoLinks[String(videoNum)];
-          const videoPlayer = document.getElementById('video-player');
-          const videoTitle = document.getElementById('video-title');
-
-          // Cargar preguntas del video
-          currentVideoObj = data.videos.find(v => String(v.id) === String(videoNum)) || null;
-          currentQuestions = (currentVideoObj?.questions || []).slice().sort((a,b) => a.time - b.time);
-          askedQuestions = new Set();
-
-          // reset intento (nuevo)
-          attemptPhase = 'playback';
-          qState = {};
-
-          const newAttemptId = await createAttempt(Number(videoNum));
-          attemptId = newAttemptId;
-
-          stats = {
-            videoId: Number(videoNum),
-            attemptId,
-            startedAt: isoNow(),
-            endedAt: null,
-
-            playbackAnswered: 0,
-            playbackCorrect: 0,
-            playbackWrong: 0,
-            clicks: 0,
-
-            reviewAnswered: 0,
-            reviewCorrect: 0,
-            reviewWrong: 0,
-            score: 0
-          };
-
-          updateScoreboard();
-          updateScoreDetails();
-
-          await logEvent('open_video', { videoId: stats.videoId });
-
-          await loadYouTubeAPI();
-
-          const playerDivId = 'youtube-player';
-
-          if (ytPlayer) {
-            ytPlayer.loadVideoById(videoId);
-          } else {
-            ytPlayer = new YT.Player(playerDivId, {
-              videoId,
-              playerVars: { autoplay: 1, rel: 0 },
-              events: {
-                onReady: async () => {
-                  await logEvent('player_ready', { videoId: stats.videoId });
-                  startQuizWatcher();
-                },
-                onStateChange: async (e) => {
-                  if (e.data === YT.PlayerState.PLAYING) {
-                    await logEvent('play', { videoId: stats.videoId });
-                    startQuizWatcher();
-                  }
-                  if (e.data === YT.PlayerState.PAUSED) {
-                    await logEvent('pause', { videoId: stats.videoId });
-                  }
-                  if (e.data === YT.PlayerState.ENDED) {
-                    // VIDEO TERMINÓ
-                    attemptPhase = 'ended';
-                    stopQuizWatcher();
-
-                    stats.endedAt = isoNow();
-                    await logEvent('ended', { videoId: stats.videoId });
-
-                    await saveAttemptSummary('finished');
-                    updateScoreboard();
-                    updateScoreDetails();
-
-                    showEndModal(true);
-                  }
-                }
-              }
-            });
-          }
-
-          // mostrar UI player
-          videoTitle.textContent = videoTitles[String(videoNum)] || `Video ${videoNum}`;
-          videoPlayer.style.display = 'block';
-          videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-          // iniciar watcher
-          startQuizWatcher();
-        }
-
-        // Botones de video
-        document.querySelectorAll('.video-btn').forEach(btn => {
-          btn.addEventListener('click', async () => {
+        // Eventos: click en video
+        document.querySelectorAll(".video-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
             const videoNum = btn.dataset.video;
-            await openVideo(videoNum);
+            const videoId = videoLinks[videoNum];
+            const videoPlayer = document.getElementById("video-player");
+            const videoTitle = document.getElementById("video-title");
+            const attemptIdEl = document.getElementById("attempt-id");
+
+            // cargar video obj y preguntas
+            currentVideoObj = data.videos.find((v) => String(v.id) === String(videoNum)) || null;
+            currentQuestions = (currentVideoObj?.questions || []).slice().sort((a, b) => a.time - b.time);
+            askedQuestions = new Set();
+
+            // init estados
+            stats = { videoId: Number(videoNum), score: 0, answered: 0, correct: 0, wrong: 0, clicks: 0 };
+            initQuestionState();
+
+            // crear intento en Firestore
+            currentAttemptId = await createAttemptDoc(stats.videoId, currentVideoObj?.title || `Video ${stats.videoId}`);
+            if (attemptIdEl) attemptIdEl.textContent = currentAttemptId ? `Intento ID: ${currentAttemptId}` : "";
+
+            await saveAttemptSummary();
+
+            // montar player
+            await loadYouTubeAPI();
+
+            if (ytPlayer) {
+              ytPlayer.loadVideoById(videoId);
+            } else {
+              ytPlayer = new YT.Player("youtube-player", {
+                videoId,
+                playerVars: { autoplay: 1, rel: 0 },
+                events: {
+                  onReady: async () => {
+                    startQuizWatcher();
+                  },
+                  onStateChange: async (e) => {
+                    if (e.data === YT.PlayerState.PLAYING) startQuizWatcher();
+                    if (e.data === YT.PlayerState.ENDED) {
+                      stopQuizWatcher();
+                      recomputeStatsFromState();
+                      await closeAttemptSummary();
+                      showEndModal(); // ✅ aquí sale la tabla + botones
+                    }
+                  },
+                },
+              });
+            }
+
+            // mostrar panel
+            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
+            videoPlayer.style.display = "block";
+            videoPlayer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+            startQuizWatcher();
           });
         });
 
-        // Botón cerrar reproductor
-        document.getElementById('close-video').addEventListener('click', async () => {
-          const videoPlayer = document.getElementById('video-player');
+        // cerrar reproductor
+        document.getElementById("close-video").addEventListener("click", async () => {
           stopQuizWatcher();
-          setOverlayVisible(false);
-          showEndModal(false);
+
+          const overlay = document.getElementById("quiz-overlay");
+          if (overlay) overlay.style.display = "none";
+
+          hideEndModal();
 
           if (ytPlayer) {
             try { ytPlayer.stopVideo(); } catch {}
           }
 
-          // si estaba en progreso, lo marcamos cerrado
-          if (stats?.attemptId) {
-            stats.endedAt = stats.endedAt || isoNow();
-            await logEvent('close_video', { videoId: stats.videoId });
-            await saveAttemptSummary('closed');
-          }
+          await closeAttemptSummary();
 
-          videoPlayer.style.display = 'none';
-          attemptPhase = 'idle';
+          document.getElementById("video-player").style.display = "none";
         });
-
-        // Acciones del modal final
-        document.addEventListener('click', async (e) => {
-          if (e.target?.id === 'btn-end-close') {
-            showEndModal(false);
-            return;
-          }
-
-          if (e.target?.id === 'btn-review-wrong') {
-            showEndModal(false);
-            await logEvent('start_review', { mode: 'wrong_only' });
-            startReview('wrong_only');
-            return;
-          }
-
-          if (e.target?.id === 'btn-review-all') {
-            showEndModal(false);
-            await logEvent('start_review', { mode: 'all' });
-            startReview('all');
-            return;
-          }
-
-          if (e.target?.id === 'btn-retry-video') {
-            showEndModal(false);
-            // repetir video => NUEVO INTENTO
-            const vid = stats.videoId;
-            await logEvent('retry_video_new_attempt', { videoId: vid });
-
-            // reinicia player desde 0 y crea attempt nuevo
-            await openVideo(vid);
-            return;
-          }
-        });
-
       } catch (error) {
-        console.error('Error al cargar datos:', error);
-        showMessage('error', 'Error al cargar información del usuario');
+        console.error("Error al cargar datos:", error);
+        showMessage("error", "Error al cargar información del usuario");
       }
     }
 
+    /*************************************************************
+     * 10) AUTH STATE
+     *************************************************************/
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         currentUser = user;
