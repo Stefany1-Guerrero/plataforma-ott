@@ -51,6 +51,7 @@
     let currentVideoObj = null;
     let currentQuestions = [];
     let askedQuestions = new Set();
+    let attemptsBuffer = []; // ✅ tabla instantánea (no depende de Firestore)
 
     // ======= ✅ (GRUPO 4) Estadística =======
     let stats = {
@@ -211,18 +212,28 @@
     }
 
     async function finalizeAttempt(reason = 'close') {
+      // ✅ si no respondió nada, no guardes intento
+      if (stats.answered === 0) return;
+    
+      // ✅ construye el intento final
+      const attempt = {
+        at: new Date().toISOString(),
+        score10: calcScore10(),
+        correct: stats.correct,
+        wrong: stats.wrong,
+        total: stats.total
+      };
+    
+      // 1) ✅ ACTUALIZA LA TABLA AL INSTANTE (sin Firestore)
+      attemptsBuffer = [attempt, ...attemptsBuffer].slice(0, 3);
+      renderAttemptsTable(attemptsBuffer);
+    
+      // 2) ✅ INTENTA GUARDAR EN FIRESTORE (para persistencia en otros dispositivos)
       try {
-        // si no respondió nada, no guardes (opcional pero recomendado)
-        if (stats.answered === 0) return;
-    
-        await saveAttemptRollingFinal();   // guarda lastAttempts (tabla)
-        await saveVideoSummary();          // guarda resumen (tu doc actual)
-        await loadLastAttempts(stats.videoId); // refresca la tabla al instante
-    
-        console.log('✅ Intento guardado:', { reason, videoId: stats.videoId, answered: stats.answered });
+        await saveAttemptRollingFinal(); // guarda lastAttempts en Firestore
+        await saveVideoSummary();        // guarda resumen
       } catch (e) {
-        console.error("No se pudo guardar intento final:", e);
-        showMessage('error', `No se guardó el intento: ${e?.code || ''} ${e?.message || e}`);
+        console.warn("Firestore falló, pero la tabla ya se actualizó:", e);
       }
     }
     
@@ -729,6 +740,9 @@
               wrong: 0,
               clicks: 0
             };
+            
+            attemptsBuffer = [];
+            renderAttemptsTable([]);
             
             updateScoreboard();
             updateScoreDetails();
