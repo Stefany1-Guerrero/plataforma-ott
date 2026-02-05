@@ -915,90 +915,76 @@
         });
 
         // Eventos: click en video
-        document.querySelectorAll(".video-btn").forEach((btn) => {
-          btn.addEventListener("click", async () => {
+        document.querySelectorAll('.video-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
             const videoNum = btn.dataset.video;
             const videoId = videoLinks[videoNum];
+            const videoPlayer = document.getElementById('video-player');
+            const videoTitle = document.getElementById('video-title');
         
-            if (!videoId) {
-              showMessage("error", `No encontré el youtubeId para Video ${videoNum} en content.json`);
-              return;
-            }
-        
-            const videoPlayer = document.getElementById("video-player");
-            const videoTitle = document.getElementById("video-title");
-            const attemptIdEl = document.getElementById("attempt-id");
-        
-            // ✅ 1) MOSTRAR primero el panel (evita bug de YT con display:none)
-            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
-            videoPlayer.style.display = "block";
-            videoPlayer.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        
-            // Mensaje “cargando”
-            const ytDiv = document.getElementById("youtube-player");
-            if (ytDiv) {
-              ytDiv.innerHTML = `
-                <div class="w-full h-full flex items-center justify-center text-white/80">
-                  Cargando video...
-                </div>
-              `;
-            }
-        
-            // ✅ 2) Cargar data del video y preguntas
-            currentVideoObj = data.videos.find((v) => String(v.id) === String(videoNum)) || null;
-            currentQuestions = (currentVideoObj?.questions || []).slice().sort((a, b) => a.time - b.time);
+            // 0) detener cosas viejas SIEMPRE
+            stopQuizWatcher();
             askedQuestions = new Set();
         
-            stats = { videoId: Number(videoNum), score: 0, answered: 0, correct: 0, wrong: 0, clicks: 0 };
-            initQuestionState();
+            // 1) UI primero (para evitar player en contenedor "invisible")
+            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
+            videoPlayer.style.display = 'block';
+            videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         
-            // ✅ 3) Crear intento en Firestore
-            currentAttemptId = await createAttemptDoc(stats.videoId, currentVideoObj?.title || `Video ${stats.videoId}`);
-            if (attemptIdEl) attemptIdEl.textContent = currentAttemptId ? `Intento ID: ${currentAttemptId}` : "";
-            await saveAttemptSummary();
+            const yp = document.getElementById('youtube-player');
+            if (yp) yp.innerHTML = `<div class="text-gray-200 p-4">Cargando video...</div>`;
         
-            // ✅ 4) Asegurar que el DOM ya “pintó” antes de crear YT.Player
-            await new Promise((r) => requestAnimationFrame(r));
+            // 2) esperar a que el layout se pinte
+            await new Promise(r => requestAnimationFrame(r));
         
-            // ✅ 5) Cargar API y montar player
+            // 3) cargar preguntas del video
+            currentVideoObj = data.videos.find(v => String(v.id) === String(videoNum)) || null;
+            currentQuestions = (currentVideoObj?.questions || [])
+              .slice()
+              .sort((a,b) => a.time - b.time);
+        
+            // 4) cargar API
             await loadYouTubeAPI();
         
-            if (ytPlayer) {
-              try {
-                ytPlayer.loadVideoById(videoId);
-              } catch (e) {
-                console.warn("loadVideoById falló, recreando player", e);
-                ytPlayer = null;
-              }
-            }
+            // 5) crear/reusar player de forma segura
+            const playerDivId = 'youtube-player';
         
             if (!ytPlayer) {
-              ytPlayer = new YT.Player("youtube-player", {
+              ytPlayer = new YT.Player(playerDivId, {
                 videoId,
                 playerVars: { autoplay: 1, rel: 0 },
                 events: {
                   onReady: () => {
                     startQuizWatcher();
                   },
-                  onStateChange: async (e) => {
+                  onStateChange: (e) => {
                     if (e.data === YT.PlayerState.PLAYING) startQuizWatcher();
-                    if (e.data === YT.PlayerState.ENDED) {
-                      stopQuizWatcher();
-                      recomputeStatsFromState();
-                      await closeAttemptSummary();
-                      showEndModal();
-                    }
-                  },
-                  onError: (e) => {
-                    console.error("YouTube error:", e);
-                    showMessage("error", "YouTube bloqueó o falló al cargar el video (revisa ID / permisos del video).");
+                    if (e.data === YT.PlayerState.ENDED) stopQuizWatcher();
                   }
-                },
+                }
               });
+            } else {
+              // reusar
+              try {
+                ytPlayer.loadVideoById(videoId);
+              } catch (e) {
+                console.warn("loadVideoById falló, recreando player", e);
+                ytPlayer = null;
+                document.getElementById('youtube-player').innerHTML = '';
+                await new Promise(r => requestAnimationFrame(r));
+                ytPlayer = new YT.Player(playerDivId, {
+                  videoId,
+                  playerVars: { autoplay: 1, rel: 0 },
+                  events: {
+                    onReady: () => startQuizWatcher(),
+                    onStateChange: (e) => {
+                      if (e.data === YT.PlayerState.PLAYING) startQuizWatcher();
+                      if (e.data === YT.PlayerState.ENDED) stopQuizWatcher();
+                    }
+                  }
+                });
+              }
             }
-        
-            // ✅ 6) arrancar watcher (por si tarda en PLAYING)
-            startQuizWatcher();
           });
         });
 
