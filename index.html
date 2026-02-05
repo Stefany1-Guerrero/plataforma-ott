@@ -221,7 +221,8 @@
     
         console.log('✅ Intento guardado:', { reason, videoId: stats.videoId, answered: stats.answered });
       } catch (e) {
-        console.warn('❌ finalizeAttempt falló:', e);
+        console.error("No se pudo guardar intento final:", e);
+        showMessage('error', `No se guardó el intento: ${e?.code || ''} ${e?.message || e}`);
       }
     }
     
@@ -333,7 +334,8 @@
               await saveVideoSummary();
             }
           } catch (e) {
-            console.warn("Fallo guardando en Firestore, pero el video debe continuar:", e);
+            console.error('No se pudo guardar resumen del video', e);
+            showMessage('error', `No se guardó resumen: ${e?.code || ''} ${e?.message || e}`);
           }
         });
 
