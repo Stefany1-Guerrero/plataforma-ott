@@ -1,167 +1,149 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Plataforma OTT - Firebase</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-
 <body>
   <div id="root"></div>
 
   <script type="module">
-    /***********************
-     * 1) CONFIG + HELPERS
-     ***********************/
     let currentUser = null;
 
-    // ✅ Tu JSON (videos + preguntas + time)
-    const CONTENT_URL =
-      "https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json";
+    // ✅ OJO: Ajusta esta URL si tu repo realmente usa /datos/contenido.json (y no /data/content.json)
+    const CONTENT_URL = 'https://raw.githubusercontent.com/Stefany1-Guerrero/plataforma-ott/main/data/content.json';
 
     let contentCache = null;
     async function loadContent() {
       if (contentCache) return contentCache;
-      const res = await fetch(CONTENT_URL, { cache: "no-store" });
-      if (!res.ok) throw new Error("No se pudo cargar content.json");
+      const res = await fetch(CONTENT_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('No se pudo cargar content.json');
       contentCache = await res.json();
       return contentCache;
     }
 
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import {
       getAuth,
       createUserWithEmailAndPassword,
       signInWithEmailAndPassword,
       onAuthStateChanged,
-      signOut,
-    } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+      signOut
+    } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
+    // ✅ Importa helpers extra (tu grupo: stats + eventos + guardado)
     import {
       getFirestore,
       doc,
       setDoc,
       getDoc,
-      updateDoc,
       collection,
-      addDoc,
-      getDocs,
-      query,
-      orderBy,
-      limit,
-    } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+      addDoc
+    } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-    // Firebase config
-    const firebaseConfig = {
-      apiKey: "AIzaSyCu-GYKblx8v94XMLeIEbpwpxJjxmihyaE",
-      authDomain: "plataforma-ott.firebaseapp.com",
-      projectId: "plataforma-ott",
-      storageBucket: "plataforma-ott.firebasestorage.app",
-      messagingSenderId: "623885901425",
-      appId: "1:623885901425:web:d3fa5079d942eb064a05d0",
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    function isoNow() {
-      return new Date().toISOString();
-    }
-
-    function showMessage(type, text) {
-      const messageDiv = document.getElementById("message");
-      if (!messageDiv) return;
-
-      messageDiv.className = `flex items-center gap-2 p-4 rounded-lg mb-6 ${
-        type === "error"
-          ? "bg-red-500/20 border border-red-500/50"
-          : "bg-green-500/20 border border-green-500/50"
-      }`;
-      messageDiv.innerHTML = `
-        <span class="text-2xl">${type === "error" ? "⚠️" : "✅"}</span>
-        <span class="${type === "error" ? "text-red-300" : "text-green-300"}">${text}</span>
-      `;
-      messageDiv.style.display = "flex";
-
-      if (type === "success") {
-        setTimeout(() => (messageDiv.style.display = "none"), 2500);
-      }
-    }
-
-    /**************************************
-     * 2) YOUTUBE PLAYER + QUIZ (CORE)
-     **************************************/
+    // ===== YouTube IFrame API + Quiz state =====
     let ytPlayer = null;
     let quizInterval = null;
 
-    // Datos del video actual
+    // video actual del JSON
     let currentVideoObj = null;
     let currentQuestions = [];
-    let askedQuestions = new Set(); // evita disparar misma pregunta 2 veces durante reproducción
+    let askedQuestions = new Set();
 
-    // Intento actual (Firestore)
-    let currentAttemptId = null;
-
-    // Estado por pregunta (para el método nuevo)
-    // questionState[qid] = { seen, firstSelectedIndex, firstCorrect, finalSelectedIndex, finalCorrect, wrongAttempts }
-    let questionState = {};
-
-    // Score (se calcula por "finalCorrect" al terminar/revisar)
+    // ======= ✅ (GRUPO 4) Estadística =======
     let stats = {
       videoId: null,
-      score: 0,      // = #preguntas finalCorrect true
-      answered: 0,   // preguntas con finalSelectedIndex != null
-      correct: 0,    // = score
-      wrong: 0,      // total intentos incorrectos (playback + review)
-      clicks: 0,
+      score: 0,
+      answered: 0, // preguntas COMPLETADAS (cuando el usuario acierta)
+      correct: 0,
+      wrong: 0,    // intentos incorrectos (cada click incorrecto suma 1)
+      clicks: 0
     };
 
-    // Modo revisión final
-    let reviewMode = null;     // "wrong" | "all" | null
-    let reviewQueue = [];      // array de preguntas a revisar
-    let reviewIndex = 0;
+    let completedQuestions = new Set(); // preguntas ya completadas (cuando acierta por primera vez)
+    let wrongAttemptsByQ = {};          // { questionId: #intentosIncorrectosAntesDeAcertar }
 
     function calcAccuracy() {
-      const total = currentQuestions.length || 0;
-      return total ? Math.round((stats.score / total) * 100) : 0;
-    }
-
-    function recomputeStatsFromState() {
-      const qs = Object.values(questionState);
-      const totalWrong = qs.reduce((acc, q) => acc + (q.wrongAttempts || 0), 0);
-      const answered = qs.filter((q) => q.finalSelectedIndex !== null && q.finalSelectedIndex !== undefined).length;
-      const score = qs.filter((q) => q.finalCorrect === true).length;
-
-      stats.score = score;
-      stats.correct = score;
-      stats.answered = answered;
-      stats.wrong = totalWrong;
-
-      updateScoreboard();
-      updateScoreDetails();
+      return stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0;
     }
 
     function updateScoreboard() {
-      const el = document.getElementById("scoreboard");
+      const el = document.getElementById('scoreboard');
       if (!el) return;
       el.textContent = `Puntaje: ${stats.score} | Respondidas: ${stats.answered}`;
     }
 
     function updateScoreDetails() {
-      const el = document.getElementById("score-details");
+      const el = document.getElementById('score-details');
       if (!el) return;
       el.textContent = `Aciertos: ${stats.correct} | Errores: ${stats.wrong} | %: ${calcAccuracy()}% | Clics: ${stats.clicks}`;
     }
 
-    // YouTube API loader
+    async function logEvent(type, extra = {}) {
+      if (!currentUser) return;
+      try {
+        await addDoc(collection(db, 'users', currentUser.uid, 'events'), {
+          type,
+          videoId: stats.videoId,
+          ...extra,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('No se pudo guardar evento', e);
+      }
+    }
+
+    async function saveAnswer({ videoId, questionId, attemptsWrong, timeInVideo }) {
+      if (!currentUser) return;
+      try {
+        await addDoc(collection(db, 'users', currentUser.uid, 'answers'), {
+          videoId,
+          questionId,
+          attemptsWrong,
+          timeInVideo,
+          answeredAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('No se pudo guardar respuesta', e);
+      }
+    }
+
+    async function saveVideoSummary() {
+      if (!currentUser || !stats.videoId) return;
+
+      const accuracy = stats.answered ? (stats.correct / stats.answered) : 0;
+
+      try {
+        await setDoc(
+          doc(db, 'users', currentUser.uid, 'videoAttempts', String(stats.videoId)),
+          {
+            videoId: stats.videoId,
+            score: stats.score,
+            answered: stats.answered,
+            correct: stats.correct,
+            wrong: stats.wrong,
+            clicks: stats.clicks,
+            accuracy,
+            updatedAt: new Date().toISOString()
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn('No se pudo guardar resumen del video', e);
+      }
+    }
+
+    // ========= YouTube helpers =========
     function loadYouTubeAPI() {
       return new Promise((resolve) => {
         if (window.YT && window.YT.Player) return resolve();
-        const tag = document.createElement("script");
+
+        const tag = document.createElement('script');
         tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
+
         window.onYouTubeIframeAPIReady = () => resolve();
       });
     }
@@ -171,450 +153,157 @@
       quizInterval = null;
     }
 
-    // ✅ Watcher durante reproducción: dispara pregunta en el segundo exacto
     function startQuizWatcher() {
       stopQuizWatcher();
+
       quizInterval = setInterval(() => {
         if (!ytPlayer || !currentQuestions.length) return;
+
         const t = Math.floor(ytPlayer.getCurrentTime());
-        const q = currentQuestions.find((q) => q.time === t && !askedQuestions.has(q.id));
+
+        // pregunta exacta en ese segundo
+        const q = currentQuestions.find(q => q.time === t && !askedQuestions.has(q.id));
         if (q) {
           askedQuestions.add(q.id);
-          showQuizPlayback(q);
+          showQuiz(q);
         }
       }, 500);
     }
 
-    /**************************************
-     * 3) FIRESTORE: ATTEMPTS + ANSWERS
-     **************************************/
-    async function createAttemptDoc(videoId, videoTitle) {
-      if (!currentUser) return null;
-      const ref = await addDoc(collection(db, "users", currentUser.uid, "attempts"), {
-        videoId,
-        videoTitle,
-        startedAt: isoNow(),
-        finishedAt: null,
-        score: 0,
-        answered: 0,
-        correct: 0,
-        wrong: 0,
-        clicks: 0,
-        accuracy: 0,
-      });
-      return ref.id;
-    }
-
-    async function saveAnswerDoc({ mode, questionId, selectedIndex, correct, timeInVideo }) {
-      if (!currentUser || !currentAttemptId) return;
-      try {
-        await addDoc(collection(db, "users", currentUser.uid, "attempts", currentAttemptId, "answers"), {
-          mode, // "playback" | "review"
-          questionId,
-          selectedIndex,
-          correct,
-          timeInVideo,
-          createdAt: isoNow(),
-        });
-      } catch (e) {
-        console.warn("No se pudo guardar answer", e);
-      }
-    }
-
-    async function saveAttemptSummary() {
-      if (!currentUser || !currentAttemptId) return;
-      try {
-        await updateDoc(doc(db, "users", currentUser.uid, "attempts", currentAttemptId), {
-          finishedAt: null, // se pone al final real
-          score: stats.score,
-          answered: stats.answered,
-          correct: stats.correct,
-          wrong: stats.wrong,
-          clicks: stats.clicks,
-          accuracy: (currentQuestions.length ? stats.score / currentQuestions.length : 0),
-          updatedAt: isoNow(),
-        });
-      } catch (e) {
-        console.warn("No se pudo guardar resumen", e);
-      }
-    }
-
-    async function closeAttemptSummary() {
-      if (!currentUser || !currentAttemptId) return;
-      try {
-        await updateDoc(doc(db, "users", currentUser.uid, "attempts", currentAttemptId), {
-          finishedAt: isoNow(),
-          score: stats.score,
-          answered: stats.answered,
-          correct: stats.correct,
-          wrong: stats.wrong,
-          clicks: stats.clicks,
-          accuracy: (currentQuestions.length ? stats.score / currentQuestions.length : 0),
-          updatedAt: isoNow(),
-        });
-      } catch (e) {
-        console.warn("No se pudo cerrar resumen", e);
-      }
-    }
-
-    /*************************************************************
-     * 4) MÉTODO NUEVO: PLAYBACK = 1 intento, si falla sigue video
-     *************************************************************/
-    function initQuestionState() {
-      questionState = {};
-      for (const q of currentQuestions) {
-        questionState[q.id] = {
-          seen: false,
-          firstSelectedIndex: null,
-          firstCorrect: null,
-          finalSelectedIndex: null,
-          finalCorrect: false,
-          wrongAttempts: 0,
-        };
-      }
-      recomputeStatsFromState();
-    }
-
-    function showQuizPlayback(q) {
+    function showQuiz(q) {
       // pausa video
       try { ytPlayer.pauseVideo(); } catch {}
 
-      const overlay = document.getElementById("quiz-overlay");
-      const qEl = document.getElementById("quiz-question");
-      const optsEl = document.getElementById("quiz-options");
-      const fbEl = document.getElementById("quiz-feedback");
-      const btnContinue = document.getElementById("quiz-continue");
+      const overlay = document.getElementById('quiz-overlay');
+      const qEl = document.getElementById('quiz-question');
+      const optsEl = document.getElementById('quiz-options');
+      const fbEl = document.getElementById('quiz-feedback');
+      const btnContinue = document.getElementById('quiz-continue');
 
-      // UI
       qEl.textContent = q.question;
-      fbEl.textContent = "Responde (solo 1 intento).";
+      fbEl.textContent = '';
       fbEl.className = "text-sm mt-3 text-gray-300";
-      btnContinue.style.display = "none"; // ✅ ya no se usa en playback
-      btnContinue.onclick = null;
-
-      optsEl.innerHTML = "";
-
-      let answeredNow = false;
+      btnContinue.style.display = 'none';
+      optsEl.innerHTML = '';
 
       q.options.forEach((opt, idx) => {
-        const btn = document.createElement("button");
-        btn.className =
-          "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
+        const btn = document.createElement('button');
+        btn.className = "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
         btn.textContent = opt;
 
-        btn.addEventListener("click", async () => {
-          if (answeredNow) return;
-          answeredNow = true;
-
-          // disable buttons
-          [...optsEl.querySelectorAll("button")].forEach((b) => {
-            b.disabled = true;
-            b.classList.add("opacity-60", "cursor-not-allowed");
-          });
-
+        btn.addEventListener('click', async () => {
+          // ✅ (GRUPO 4) registrar clic/selección
           stats.clicks += 1;
-
-          const st = questionState[q.id];
-          st.seen = true;
+          updateScoreDetails();
+          await logEvent('select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
 
           const isCorrect = idx === q.correctIndex;
 
-          // Solo 1 intento: se guarda primera respuesta y se fija final por ahora
-          st.firstSelectedIndex = idx;
-          st.firstCorrect = isCorrect;
-
-          // Si fue correcta, cuenta como finalCorrect
           if (isCorrect) {
-            st.finalSelectedIndex = idx;
-            st.finalCorrect = true;
-            fbEl.textContent = `✅ Correcto. El video continúa…`;
+            fbEl.textContent = `✅ Correcto. ${q.explanation || ''}`;
             fbEl.className = "text-sm mt-3 text-green-300";
-          } else {
-            st.finalSelectedIndex = idx;   // queda registrada como final (pero podrá cambiar en revisión)
-            st.finalCorrect = false;
-            st.wrongAttempts += 1;
-            fbEl.textContent = `❌ Incorrecto. Registrado. El video continúa…`;
-            fbEl.className = "text-sm mt-3 text-red-300";
-          }
+            btnContinue.style.display = 'inline-flex';
 
-          await saveAnswerDoc({
-            mode: "playback",
-            questionId: q.id,
-            selectedIndex: idx,
-            correct: isCorrect,
-            timeInVideo: q.time
-          });
+            // ✅ Solo contar si no estaba completada ya (evita doble conteo)
+            if (!completedQuestions.has(q.id)) {
+              completedQuestions.add(q.id);
 
-          recomputeStatsFromState();
-          await saveAttemptSummary();
+              const wrongAttempts = wrongAttemptsByQ[q.id] || 0;
 
-          // cerrar overlay y seguir
-          setTimeout(() => {
-            overlay.style.display = "none";
-            try { ytPlayer.playVideo(); } catch {}
-          }, 900);
-        });
+              stats.correct += 1;
+              stats.answered += 1;
 
-        optsEl.appendChild(btn);
-      });
+              // Puntaje: 1 punto por pregunta (pueden cambiarlo a 10 si quieren)
+              stats.score += 1;
 
-      overlay.style.display = "flex";
-    }
+              updateScoreboard();
+              updateScoreDetails();
 
-    /*************************************************************
-     * 5) REVISIÓN AL FINAL: puedes repetir preguntas y ganar puntaje
-     *    - "Repasar incorrectas/no respondidas"
-     *    - "Repasar todas"
-     *************************************************************/
-    function buildReviewQueue(mode) {
-      const qs = currentQuestions.slice();
-      if (mode === "all") return qs;
+              // guardar respuesta + resumen parcial
+              await saveAnswer({
+                videoId: stats.videoId,
+                questionId: q.id,
+                attemptsWrong: wrongAttempts,
+                timeInVideo: q.time
+              });
 
-      // wrong/unanswered:
-      return qs.filter((q) => {
-        const st = questionState[q.id];
-        const unanswered = st.finalSelectedIndex === null || st.finalSelectedIndex === undefined;
-        const wrong = st.finalCorrect === false;
-        return unanswered || wrong;
-      });
-    }
-
-    function startReview(mode) {
-      reviewMode = mode;
-      reviewQueue = buildReviewQueue(mode);
-      reviewIndex = 0;
-
-      if (!reviewQueue.length) {
-        showEndSummaryMessage("✅ No hay preguntas pendientes para repasar.");
-        return;
-      }
-
-      hideEndModal();
-      showReviewQuestion(reviewQueue[reviewIndex]);
-    }
-
-    function showReviewQuestion(q) {
-      const overlay = document.getElementById("quiz-overlay");
-      const qEl = document.getElementById("quiz-question");
-      const optsEl = document.getElementById("quiz-options");
-      const fbEl = document.getElementById("quiz-feedback");
-      const btnContinue = document.getElementById("quiz-continue");
-
-      // En revisión NO dependemos del video
-      try {
-        ytPlayer.pauseVideo();
-        ytPlayer.seekTo(q.time, true);
-      } catch {}
-
-      qEl.textContent = q.question;
-      fbEl.textContent = "Modo repaso: puedes intentar hasta acertar para ganar el punto.";
-      fbEl.className = "text-sm mt-3 text-gray-300";
-      btnContinue.style.display = "none";
-      btnContinue.onclick = null;
-
-      optsEl.innerHTML = "";
-
-      // en revisión puedes intentar varias veces hasta acertar
-      let isSolved = false;
-
-      q.options.forEach((opt, idx) => {
-        const btn = document.createElement("button");
-        btn.className =
-          "w-full text-left bg-gray-700/60 hover:bg-gray-600/60 text-white rounded-lg px-4 py-3 transition-all";
-        btn.textContent = opt;
-
-        btn.addEventListener("click", async () => {
-          if (isSolved) return;
-
-          stats.clicks += 1;
-          const st = questionState[q.id];
-          const isCorrect = idx === q.correctIndex;
-
-          await saveAnswerDoc({
-            mode: "review",
-            questionId: q.id,
-            selectedIndex: idx,
-            correct: isCorrect,
-            timeInVideo: q.time
-          });
-
-          if (isCorrect) {
-            // si antes estaba incorrecta, ahora gana punto
-            st.finalSelectedIndex = idx;
-            if (st.finalCorrect !== true) {
-              st.finalCorrect = true;
+              await saveVideoSummary();
             }
-            fbEl.textContent = `✅ Correcto.`;
-            fbEl.className = "text-sm mt-3 text-green-300";
-            isSolved = true;
-
-            // deshabilita opciones y muestra botón siguiente
-            [...optsEl.querySelectorAll("button")].forEach((b) => {
-              b.disabled = true;
-              b.classList.add("opacity-60", "cursor-not-allowed");
-            });
-
-            btnContinue.style.display = "inline-flex";
-            btnContinue.textContent = (reviewIndex < reviewQueue.length - 1) ? "Siguiente" : "Finalizar repaso";
-            btnContinue.onclick = async () => {
-              btnContinue.style.display = "none";
-              overlay.style.display = "none";
-
-              recomputeStatsFromState();
-              await saveAttemptSummary();
-
-              reviewIndex += 1;
-              if (reviewIndex >= reviewQueue.length) {
-                showEndModal(); // volver al final
-              } else {
-                showReviewQuestion(reviewQueue[reviewIndex]);
-              }
-            };
           } else {
-            st.wrongAttempts += 1;
-            fbEl.textContent = `❌ Incorrecto. Intenta otra vez (repaso).`;
+            fbEl.textContent = "❌ Incorrecto. Intenta otra vez.";
             fbEl.className = "text-sm mt-3 text-red-300";
-            recomputeStatsFromState();
-            await saveAttemptSummary();
+
+            stats.wrong += 1;
+            wrongAttemptsByQ[q.id] = (wrongAttemptsByQ[q.id] || 0) + 1;
+
+            updateScoreDetails();
+            await logEvent('wrong_attempt', { questionId: q.id, timeInVideo: q.time });
+            await saveVideoSummary();
           }
         });
 
         optsEl.appendChild(btn);
       });
 
-      overlay.style.display = "flex";
+      btnContinue.onclick = async () => {
+        overlay.style.display = 'none';
+        await logEvent('continue', { questionId: q.id, timeInVideo: q.time });
+        try { ytPlayer.playVideo(); } catch {}
+      };
+
+      overlay.style.display = 'flex';
     }
 
-    /*************************************************************
-     * 6) END MODAL: TABLA + BOTONES (lo que te faltaba)
-     *************************************************************/
-    function statusLabelFor(qid) {
-      const st = questionState[qid];
-      const unanswered = st.finalSelectedIndex === null || st.finalSelectedIndex === undefined;
-      if (unanswered) return { text: "No respondida", cls: "text-yellow-300" };
-      if (st.finalCorrect) return { text: "Correcta", cls: "text-green-300" };
-      return { text: "Incorrecta", cls: "text-red-300" };
-    }
+    // Configuración de Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyCu-GYKblx8v94XMLeIEbpwpxJjxmihyaE",
+      authDomain: "plataforma-ott.firebaseapp.com",
+      projectId: "plataforma-ott",
+      storageBucket: "plataforma-ott.firebasestorage.app",
+      messagingSenderId: "623885901425",
+      appId: "1:623885901425:web:d3fa5079d942eb064a05d0"
+    };
 
-    function buildEndTableHTML() {
-      return `
-        <div class="mt-4 overflow-auto max-h-72 border border-white/10 rounded-xl">
-          <table class="w-full text-sm">
-            <thead class="sticky top-0 bg-gray-900/90">
-              <tr class="text-gray-200">
-                <th class="text-left p-3">Pregunta</th>
-                <th class="text-left p-3">Estado</th>
-                <th class="text-left p-3">Errores</th>
-                <th class="text-left p-3">Tiempo</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${currentQuestions.map((q) => {
-                const st = questionState[q.id];
-                const s = statusLabelFor(q.id);
-                return `
-                  <tr class="border-t border-white/10">
-                    <td class="p-3 text-gray-100">${q.question}</td>
-                    <td class="p-3 ${s.cls} font-semibold">${s.text}</td>
-                    <td class="p-3 text-gray-200">${st.wrongAttempts || 0}</td>
-                    <td class="p-3 text-gray-200">${q.time}s</td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    function showMessage(type, text) {
+      const messageDiv = document.getElementById('message');
+      if (!messageDiv) return;
+
+      messageDiv.className = `flex items-center gap-2 p-4 rounded-lg mb-6 ${type === 'error' ? 'bg-red-500/20 border border-red-500/50' : 'bg-green-500/20 border border-green-500/50'}`;
+      messageDiv.innerHTML = `
+        <span class="text-2xl">${type === 'error' ? '⚠️' : '✅'}</span>
+        <span class="${type === 'error' ? 'text-red-300' : 'text-green-300'}">${text}</span>
       `;
+      messageDiv.style.display = 'flex';
+
+      if (type === 'success') {
+        setTimeout(() => {
+          messageDiv.style.display = 'none';
+        }, 3000);
+      }
     }
 
-    function showEndSummaryMessage(msg) {
-      const el = document.getElementById("end-summary");
-      if (!el) return;
-      el.innerHTML = `<div class="text-sm text-gray-200">${msg}</div>`;
-    }
-
-    function showEndModal() {
-      const modal = document.getElementById("end-modal");
-      const summary = document.getElementById("end-summary");
-      if (!modal || !summary) return;
-
-      recomputeStatsFromState();
-
-      summary.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-gray-200">
-          <div><b>Video:</b> ${currentVideoObj?.title || `Video ${stats.videoId}`}</div>
-          <div><b>Intento:</b> ${currentAttemptId ? currentAttemptId.slice(0, 6) : "-"}</div>
-          <div><b>Puntaje:</b> ${stats.score} / ${currentQuestions.length}</div>
-          <div><b>Precisión:</b> ${calcAccuracy()}%</div>
-          <div><b>Respondidas:</b> ${stats.answered}</div>
-          <div><b>Errores (intentos):</b> ${stats.wrong}</div>
-          <div><b>Clics:</b> ${stats.clicks}</div>
-        </div>
-        ${buildEndTableHTML()}
-      `;
-
-      modal.style.display = "flex";
-
-      // wiring botones
-      const btnWrong = document.getElementById("btn-review-wrong");
-      const btnAll = document.getElementById("btn-review-all");
-      const btnRetry = document.getElementById("btn-retry-video");
-      const btnClose = document.getElementById("btn-end-close");
-
-      if (btnWrong) btnWrong.onclick = () => startReview("wrong");
-      if (btnAll) btnAll.onclick = () => startReview("all");
-      if (btnRetry) btnRetry.onclick = () => retryVideoNewAttempt();
-      if (btnClose) btnClose.onclick = () => hideEndModal();
-    }
-
-    function hideEndModal() {
-      const modal = document.getElementById("end-modal");
-      if (modal) modal.style.display = "none";
-    }
-
-    async function retryVideoNewAttempt() {
-      hideEndModal();
-
-      // Nuevo intento = nuevo doc
-      if (!currentVideoObj || !stats.videoId) return;
-      currentAttemptId = await createAttemptDoc(stats.videoId, currentVideoObj.title || `Video ${stats.videoId}`);
-
-      // Reset estructuras
-      askedQuestions = new Set();
-      initQuestionState();
-      stats.clicks = 0;
-      recomputeStatsFromState();
-      await saveAttemptSummary();
-
-      // reinicia video
-      try {
-        ytPlayer.stopVideo();
-        ytPlayer.loadVideoById(currentVideoObj.youtubeId);
-      } catch {}
-
-      // arranca watcher
-      startQuizWatcher();
-    }
-
-    /*************************************************************
-     * 7) AUTH: REGISTER / LOGIN / LOGOUT
-     *************************************************************/
     async function handleRegister() {
-      const name = document.getElementById("reg-name").value.trim();
-      const email = document.getElementById("reg-email").value.trim();
-      const password = document.getElementById("reg-password").value;
-      const confirmPassword = document.getElementById("reg-confirm").value;
+      const name = document.getElementById('reg-name').value.trim();
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value;
+      const confirmPassword = document.getElementById('reg-confirm').value;
 
       if (!name || !email || !password || !confirmPassword) {
-        showMessage("error", "Todos los campos son obligatorios");
+        showMessage('error', 'Todos los campos son obligatorios');
         return;
       }
+
       if (password !== confirmPassword) {
-        showMessage("error", "Las contraseñas no coinciden");
+        showMessage('error', 'Las contraseñas no coinciden');
         return;
       }
+
       if (password.length < 6) {
-        showMessage("error", "La contraseña debe tener al menos 6 caracteres");
+        showMessage('error', 'La contraseña debe tener al menos 6 caracteres');
         return;
       }
 
@@ -622,78 +311,91 @@
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
 
-        await setDoc(doc(db, "users", user.uid), {
-          name,
-          email,
-          createdAt: isoNow(),
-          subscription: "basic",
+        await setDoc(doc(db, 'users', user.uid), {
+          name: name,
+          email: email,
+          createdAt: new Date().toISOString(),
+          subscription: 'basic'
         });
 
-        showMessage("success", "¡Registro exitoso! Redirigiendo...");
+        showMessage('success', '¡Registro exitoso! Redirigiendo...');
+
         setTimeout(() => {
-          document.getElementById("reg-name").value = "";
-          document.getElementById("reg-email").value = "";
-          document.getElementById("reg-password").value = "";
-          document.getElementById("reg-confirm").value = "";
+          document.getElementById('reg-name').value = '';
+          document.getElementById('reg-email').value = '';
+          document.getElementById('reg-password').value = '';
+          document.getElementById('reg-confirm').value = '';
           switchToLogin();
-        }, 1500);
+        }, 2000);
+
       } catch (error) {
-        console.error("Error:", error);
-        let errorMessage = "Error al registrar usuario";
-        if (error.code === "auth/email-already-in-use") errorMessage = "Este email ya está registrado";
-        if (error.code === "auth/invalid-email") errorMessage = "Email inválido";
-        if (error.code === "auth/weak-password") errorMessage = "La contraseña es muy débil";
-        showMessage("error", errorMessage);
+        console.error('Error:', error);
+        let errorMessage = 'Error al registrar usuario';
+
+        if (error.code === 'auth/email-already-in-use') {
+          errorMessage = 'Este email ya está registrado';
+        } else if (error.code === 'auth/invalid-email') {
+          errorMessage = 'Email inválido';
+        } else if (error.code === 'auth/weak-password') {
+          errorMessage = 'La contraseña es muy débil';
+        }
+
+        showMessage('error', errorMessage);
       }
     }
 
     async function handleLogin() {
-      const email = document.getElementById("login-email").value.trim();
-      const password = document.getElementById("login-password").value;
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
 
       if (!email || !password) {
-        showMessage("error", "Email y contraseña son obligatorios");
+        showMessage('error', 'Email y contraseña son obligatorios');
         return;
       }
 
       try {
         await signInWithEmailAndPassword(auth, email, password);
-        showMessage("success", "Iniciando sesión...");
+        showMessage('success', 'Iniciando sesión...');
+
       } catch (error) {
-        console.error("Error:", error);
-        let errorMessage = "Error al iniciar sesión";
-        if (error.code === "auth/user-not-found") errorMessage = "Usuario no encontrado";
-        if (error.code === "auth/wrong-password") errorMessage = "Contraseña incorrecta";
-        if (error.code === "auth/invalid-credential") errorMessage = "Email o contraseña incorrectos";
-        if (error.code === "auth/too-many-requests") errorMessage = "Demasiados intentos. Intenta más tarde";
-        showMessage("error", errorMessage);
+        console.error('Error:', error);
+        let errorMessage = 'Error al iniciar sesión';
+
+        if (error.code === 'auth/user-not-found') {
+          errorMessage = 'Usuario no encontrado';
+        } else if (error.code === 'auth/wrong-password') {
+          errorMessage = 'Contraseña incorrecta';
+        } else if (error.code === 'auth/invalid-credential') {
+          errorMessage = 'Email o contraseña incorrectos';
+        } else if (error.code === 'auth/too-many-requests') {
+          errorMessage = 'Demasiados intentos. Intenta más tarde';
+        }
+
+        showMessage('error', errorMessage);
       }
     }
 
     async function handleLogout() {
       try {
         await signOut(auth);
-        showMessage("success", "Sesión cerrada exitosamente");
+        showMessage('success', 'Sesión cerrada exitosamente');
       } catch (error) {
-        console.error("Error:", error);
-        showMessage("error", "Error al cerrar sesión");
+        console.error('Error:', error);
+        showMessage('error', 'Error al cerrar sesión');
       }
     }
 
-    /*************************************************************
-     * 8) UI: LOGIN PAGE
-     *************************************************************/
     function renderLoginPage() {
-      document.getElementById("root").innerHTML = `
+      document.getElementById('root').innerHTML = `
         <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
           <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-purple-500/20">
             <div class="text-center mb-8">
               <div class="text-6xl mb-4">🎬</div>
               <h1 class="text-4xl font-bold text-white mb-2">Plataforma OTT</h1>
-              <p class="text-gray-400">Con Firebase Firestore 🔥</p>
+              <p class="text-gray-400">Con Firebase Database 🔥</p>
             </div>
 
-            <div id="message" style="display:none;"></div>
+            <div id="message" style="display: none;"></div>
 
             <div class="flex gap-2 mb-6 bg-gray-700/30 p-1 rounded-lg">
               <button id="btn-login-tab" class="flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white">
@@ -716,14 +418,13 @@
                   <input type="password" id="login-password" placeholder="••••••••"
                     class="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all">
                 </div>
-                <button id="btn-login"
-                  class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
+                <button id="btn-login" class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
                   Iniciar Sesión
                 </button>
               </div>
             </div>
 
-            <div id="register-form" style="display:none;">
+            <div id="register-form" style="display: none;">
               <div class="space-y-4">
                 <div>
                   <label class="block text-gray-300 mb-2 text-sm">👤 Nombre Completo</label>
@@ -745,8 +446,7 @@
                   <input type="password" id="reg-confirm" placeholder="••••••••"
                     class="w-full bg-gray-700/50 border border-gray-600 rounded-lg py-3 px-4 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all">
                 </div>
-                <button id="btn-register"
-                  class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
+                <button id="btn-register" class="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all transform hover:scale-105">
                   Crear Cuenta
                 </button>
               </div>
@@ -755,45 +455,40 @@
         </div>
       `;
 
-      document.getElementById("btn-login-tab").addEventListener("click", switchToLogin);
-      document.getElementById("btn-register-tab").addEventListener("click", switchToRegister);
-      document.getElementById("btn-login").addEventListener("click", handleLogin);
-      document.getElementById("btn-register").addEventListener("click", handleRegister);
+      document.getElementById('btn-login-tab').addEventListener('click', switchToLogin);
+      document.getElementById('btn-register-tab').addEventListener('click', switchToRegister);
+      document.getElementById('btn-login').addEventListener('click', handleLogin);
+      document.getElementById('btn-register').addEventListener('click', handleRegister);
     }
 
     function switchToLogin() {
-      document.getElementById("login-form").style.display = "block";
-      document.getElementById("register-form").style.display = "none";
-      document.getElementById("btn-login-tab").className =
-        "flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white";
-      document.getElementById("btn-register-tab").className =
-        "flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white";
-      const messageDiv = document.getElementById("message");
-      if (messageDiv) messageDiv.style.display = "none";
+      document.getElementById('login-form').style.display = 'block';
+      document.getElementById('register-form').style.display = 'none';
+      document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+      document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+
+      const messageDiv = document.getElementById('message');
+      if (messageDiv) messageDiv.style.display = 'none';
     }
 
     function switchToRegister() {
-      document.getElementById("login-form").style.display = "none";
-      document.getElementById("register-form").style.display = "block";
-      document.getElementById("btn-login-tab").className =
-        "flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white";
-      document.getElementById("btn-register-tab").className =
-        "flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white";
-      const messageDiv = document.getElementById("message");
-      if (messageDiv) messageDiv.style.display = "none";
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('register-form').style.display = 'block';
+      document.getElementById('btn-login-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all text-gray-400 hover:text-white';
+      document.getElementById('btn-register-tab').className = 'flex-1 py-2 px-4 rounded-md transition-all bg-gradient-to-r from-purple-500 to-pink-500 text-white';
+
+      const messageDiv = document.getElementById('message');
+      if (messageDiv) messageDiv.style.display = 'none';
     }
 
-    /*************************************************************
-     * 9) UI: DASHBOARD + PLAYER + MODALS
-     *************************************************************/
     async function renderDashboard(user) {
       try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
         const userData = userDoc.data();
 
-        document.getElementById("root").innerHTML = `
+        document.getElementById('root').innerHTML = `
           <div class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
-            <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-5xl border border-purple-500/20">
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-4xl border border-purple-500/20">
               <div class="flex items-center justify-between mb-8 flex-wrap gap-4">
                 <h1 class="text-3xl font-bold text-white">🎬 Mi Plataforma OTT</h1>
                 <button id="btn-logout" class="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -801,15 +496,15 @@
                 </button>
               </div>
 
-              <div id="message" style="display:none;"></div>
+              <div id="message" style="display: none;"></div>
 
               <div class="bg-gray-700/30 rounded-xl p-6 mb-6">
-                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData?.name || "Usuario"}! 👋</h2>
+                <h2 class="text-2xl font-semibold text-white mb-4">¡Bienvenido, ${userData.name}! 👋</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-300">
-                  <p>📧 Email: ${userData?.email || user.email}</p>
-                  <p>💎 Plan: ${(userData?.subscription || "basic").toUpperCase()}</p>
+                  <p>📧 Email: ${userData.email}</p>
+                  <p>💎 Plan: ${userData.subscription.toUpperCase()}</p>
                   <p>✅ Estado: Activo</p>
-                  <p>📅 Miembro desde: ${userData?.createdAt ? new Date(userData.createdAt).toLocaleDateString() : "-"}</p>
+                  <p>📅 Miembro desde: ${new Date(userData.createdAt).toLocaleDateString()}</p>
                   <p>🔥 Base de datos: Firebase Firestore</p>
                   <p>🔒 Seguridad: Activada</p>
                 </div>
@@ -820,20 +515,21 @@
                 <p class="text-gray-300 mb-4">Explora todo el contenido de streaming disponible.</p>
 
                 <div id="video-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  ${[1,2,3,4,5,6].map(num => `
+                  ${[1, 2, 3, 4, 5, 6].map(num => `
                     <button class="video-btn bg-gray-700/50 rounded-lg p-4 text-center hover:bg-gray-600/50 transition-all cursor-pointer" data-video="${num}">
                       <p class="text-white font-medium text-sm md:text-base">🎬 Video ${num}</p>
                     </button>
-                  `).join("")}
+                  `).join('')}
                 </div>
 
-                <div id="video-player" style="display:none;" class="mt-6">
+                <div id="video-player" style="display: none;" class="mt-6">
                   <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
                     <div>
                       <h4 class="text-lg font-semibold text-white" id="video-title"></h4>
+
+                      <!-- ✅ (GRUPO 4) Marcador como el ejemplo -->
                       <div class="text-sm text-gray-200 mt-1" id="scoreboard">Puntaje: 0 | Respondidas: 0</div>
                       <div class="text-xs text-gray-300 mt-1" id="score-details">Aciertos: 0 | Errores: 0 | %: 0% | Clics: 0</div>
-                      <div class="text-xs text-gray-400 mt-1" id="attempt-id"></div>
                     </div>
 
                     <button id="close-video" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -841,57 +537,28 @@
                     </button>
                   </div>
 
-                  <div class="relative" style="padding-bottom:56.25%; height:0;">
-                    <!-- Player -->
-                    <div id="youtube-player" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
+                  <div class="relative" style="padding-bottom: 56.25%; height: 0;">
+                    <div class="relative" style="padding-bottom: 56.25%; height: 0;">
+                      <!-- Aquí vive el reproductor controlable -->
+                      <div id="youtube-player" style="position:absolute; top:0; left:0; width:100%; height:100%;"></div>
 
-                    <!-- Quiz overlay -->
-                    <div id="quiz-overlay"
-                      style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:50;"
-                      class="bg-black/70 flex items-center justify-center p-4">
-                      <div class="w-full max-w-xl bg-gray-800 rounded-xl border border-purple-500/30 p-5">
-                        <h4 id="quiz-question" class="text-white text-lg font-semibold mb-4"></h4>
-                        <div id="quiz-options" class="grid grid-cols-1 gap-2"></div>
-                        <p id="quiz-feedback" class="text-sm mt-3 text-gray-300"></p>
+                      <!-- Overlay de preguntas -->
+                      <div id="quiz-overlay"
+                        style="display:none; position:absolute; top:0; left:0; width:100%; height:100%;"
+                        class="bg-black/70 flex items-center justify-center p-4">
+                        <div class="w-full max-w-xl bg-gray-800 rounded-xl border border-purple-500/30 p-5">
+                          <h4 id="quiz-question" class="text-white text-lg font-semibold mb-4"></h4>
+                          <div id="quiz-options" class="grid grid-cols-1 gap-2"></div>
+                          <p id="quiz-feedback" class="text-sm mt-3 text-gray-300"></p>
 
-                        <div class="flex justify-end gap-2 mt-4">
-                          <button id="quiz-continue"
-                            class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
-                            style="display:none;">
-                            Continuar
-                          </button>
+                          <div class="flex justify-end gap-2 mt-4">
+                            <button id="quiz-continue"
+                              class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                              style="display:none;">
+                              Continuar
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-
-                    <!-- End modal -->
-                    <div id="end-modal"
-                      style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:60;"
-                      class="bg-black/70 flex items-center justify-center p-4">
-                      <div class="w-full max-w-3xl bg-gray-900 rounded-2xl border border-purple-500/30 p-6">
-                        <h3 class="text-white text-xl font-bold mb-3">✅ Video finalizado — Resultados del intento</h3>
-
-                        <div id="end-summary" class="mb-4"></div>
-
-                        <div class="flex flex-wrap gap-2 justify-end">
-                          <button id="btn-review-wrong" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
-                            Repasar incorrectas/no respondidas
-                          </button>
-                          <button id="btn-review-all" class="px-4 py-2 bg-purple-600/70 hover:bg-purple-700 text-white rounded-lg">
-                            Repasar todas
-                          </button>
-                          <button id="btn-retry-video" class="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
-                            Repetir video (nuevo intento)
-                          </button>
-                          <button id="btn-end-close" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg">
-                            Cerrar
-                          </button>
-                        </div>
-
-                        <p class="text-xs text-gray-400 mt-4">
-                          Cada vez que repites el video se crea un nuevo intento (documento) en Firestore:
-                          <b>users/{uid}/attempts/{attemptId}</b>
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -902,118 +569,115 @@
           </div>
         `;
 
-        document.getElementById("btn-logout").addEventListener("click", handleLogout);
+        document.getElementById('btn-logout').addEventListener('click', handleLogout);
 
         const data = await loadContent();
 
-        // Mapa videos desde JSON
+        // mapa para usar igual que antes
         const videoLinks = {};
         const videoTitles = {};
-        data.videos.forEach((v) => {
+        data.videos.forEach(v => {
           videoLinks[String(v.id)] = v.youtubeId;
           videoTitles[String(v.id)] = v.title || `Video ${v.id}`;
         });
 
-        // Eventos: click en video
         document.querySelectorAll('.video-btn').forEach(btn => {
           btn.addEventListener('click', async () => {
             const videoNum = btn.dataset.video;
             const videoId = videoLinks[videoNum];
             const videoPlayer = document.getElementById('video-player');
             const videoTitle = document.getElementById('video-title');
-        
-            // 0) detener cosas viejas SIEMPRE
-            stopQuizWatcher();
-            askedQuestions = new Set();
-        
-            // 1) UI primero (para evitar player en contenedor "invisible")
-            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
-            videoPlayer.style.display = 'block';
-            videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        
-            const yp = document.getElementById('youtube-player');
-            if (yp) yp.innerHTML = `<div class="text-gray-200 p-4">Cargando video...</div>`;
-        
-            // 2) esperar a que el layout se pinte
-            await new Promise(r => requestAnimationFrame(r));
-        
-            // 3) cargar preguntas del video
+
+            // 1) Cargar el objeto del video (para sus preguntas)
             currentVideoObj = data.videos.find(v => String(v.id) === String(videoNum)) || null;
-            currentQuestions = (currentVideoObj?.questions || [])
-              .slice()
-              .sort((a,b) => a.time - b.time);
-        
-            // 4) cargar API
+            currentQuestions = (currentVideoObj?.questions || []).slice().sort((a, b) => a.time - b.time);
+            askedQuestions = new Set();
+
+            // ✅ (GRUPO 4) reset de estadística por video
+            stats = {
+              videoId: Number(videoNum),
+              score: 0,
+              answered: 0,
+              correct: 0,
+              wrong: 0,
+              clicks: 0
+            };
+            completedQuestions = new Set();
+            wrongAttemptsByQ = {};
+            updateScoreboard();
+            updateScoreDetails();
+            await logEvent('open_video', { videoId: stats.videoId });
+
+            // 2) Cargar YouTube API y crear/reusar player
             await loadYouTubeAPI();
-        
-            // 5) crear/reusar player de forma segura
+
             const playerDivId = 'youtube-player';
-        
-            if (!ytPlayer) {
+
+            if (ytPlayer) {
+              ytPlayer.loadVideoById(videoId);
+            } else {
               ytPlayer = new YT.Player(playerDivId, {
-                videoId,
+                videoId: videoId,
                 playerVars: { autoplay: 1, rel: 0 },
                 events: {
-                  onReady: () => {
+                  onReady: async () => {
+                    await logEvent('player_ready', { videoId: stats.videoId });
                     startQuizWatcher();
                   },
-                  onStateChange: (e) => {
-                    if (e.data === YT.PlayerState.PLAYING) startQuizWatcher();
-                    if (e.data === YT.PlayerState.ENDED) stopQuizWatcher();
+                  onStateChange: async (e) => {
+                    // Puedes contar también play/pause como "clics" (eventos)
+                    if (e.data === YT.PlayerState.PLAYING) {
+                      await logEvent('play', { videoId: stats.videoId });
+                      startQuizWatcher();
+                    }
+                    if (e.data === YT.PlayerState.PAUSED) {
+                      await logEvent('pause', { videoId: stats.videoId });
+                    }
+                    if (e.data === YT.PlayerState.ENDED) {
+                      await logEvent('ended', { videoId: stats.videoId });
+                      stopQuizWatcher();
+                      await saveVideoSummary();
+                    }
                   }
                 }
               });
-            } else {
-              // reusar
-              try {
-                ytPlayer.loadVideoById(videoId);
-              } catch (e) {
-                console.warn("loadVideoById falló, recreando player", e);
-                ytPlayer = null;
-                document.getElementById('youtube-player').innerHTML = '';
-                await new Promise(r => requestAnimationFrame(r));
-                ytPlayer = new YT.Player(playerDivId, {
-                  videoId,
-                  playerVars: { autoplay: 1, rel: 0 },
-                  events: {
-                    onReady: () => startQuizWatcher(),
-                    onStateChange: (e) => {
-                      if (e.data === YT.PlayerState.PLAYING) startQuizWatcher();
-                      if (e.data === YT.PlayerState.ENDED) stopQuizWatcher();
-                    }
-                  }
-                });
-              }
             }
+
+            // 3) Mostrar reproductor
+            videoTitle.textContent = videoTitles[videoNum] || `Video ${videoNum}`;
+            videoPlayer.style.display = 'block';
+            videoPlayer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            // 4) Iniciar vigilancia de preguntas
+            startQuizWatcher();
           });
         });
 
-        // cerrar reproductor
-        document.getElementById("close-video").addEventListener("click", async () => {
+        document.getElementById('close-video').addEventListener('click', async () => {
+          const videoPlayer = document.getElementById('video-player');
+
           stopQuizWatcher();
 
-          const overlay = document.getElementById("quiz-overlay");
-          if (overlay) overlay.style.display = "none";
-
-          hideEndModal();
+          const overlay = document.getElementById('quiz-overlay');
+          if (overlay) overlay.style.display = 'none';
 
           if (ytPlayer) {
             try { ytPlayer.stopVideo(); } catch {}
           }
 
-          await closeAttemptSummary();
+          // ✅ (GRUPO 4) guardar resumen final + evento
+          await logEvent('close_video', { videoId: stats.videoId });
+          await saveVideoSummary();
 
-          document.getElementById("video-player").style.display = "none";
+          videoPlayer.style.display = 'none';
         });
+
       } catch (error) {
-        console.error("Error al cargar datos:", error);
-        showMessage("error", "Error al cargar información del usuario");
+        console.error('Error al cargar datos:', error);
+        showMessage('error', 'Error al cargar información del usuario');
       }
     }
 
-    /*************************************************************
-     * 10) AUTH STATE
-     *************************************************************/
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         currentUser = user;
