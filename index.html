@@ -209,6 +209,21 @@
         console.warn("No se pudo guardar intento final:", e);
       }
     }
+
+    async function finalizeAttempt(reason = 'close') {
+      try {
+        // si no respondió nada, no guardes (opcional pero recomendado)
+        if (stats.answered === 0) return;
+    
+        await saveAttemptRollingFinal();   // guarda lastAttempts (tabla)
+        await saveVideoSummary();          // guarda resumen (tu doc actual)
+        await loadLastAttempts(stats.videoId); // refresca la tabla al instante
+    
+        console.log('✅ Intento guardado:', { reason, videoId: stats.videoId, answered: stats.answered });
+      } catch (e) {
+        console.warn('❌ finalizeAttempt falló:', e);
+      }
+    }
     
     // ========= YouTube helpers =========
     function loadYouTubeAPI() {
@@ -747,11 +762,7 @@
                     if (e.data === YT.PlayerState.ENDED) {
                       stopQuizWatcher();
                     
-                      // ✅ guardar intento final
-                      await saveAttemptRollingFinal();
-                    
-                      // (opcional) guardar resumen
-                      await saveVideoSummary();
+                      await finalizeAttempt('ended');
                     
                       showMessage(
                         'success',
@@ -781,15 +792,12 @@
           const overlay = document.getElementById('quiz-overlay');
           if (overlay) overlay.style.display = 'none';
         
+          // ✅ guarda intento final ANTES de ocultar
+          await finalizeAttempt('close');
+        
           if (ytPlayer) {
             try { ytPlayer.stopVideo(); } catch {}
           }
-        
-          // ✅ GUARDAR INTENTO FINAL (AQUÍ ESTABA FALTANDO)
-          await saveAttemptRollingFinal();
-        
-          // (opcional, resumen general)
-          await saveVideoSummary();
         
           videoPlayer.style.display = 'none';
         });
