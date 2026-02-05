@@ -55,30 +55,29 @@
     // ======= ✅ (GRUPO 4) Estadística =======
     let stats = {
       videoId: null,
-      score: 0,
-      answered: 0, // preguntas COMPLETADAS (cuando el usuario acierta)
+      score10: 0,     // ✅ nota sobre 10
+      total: 0,       // ✅ total de preguntas del video
+      answered: 0,    // respondidas (1 intento)
       correct: 0,
-      wrong: 0,    // intentos incorrectos (cada click incorrecto suma 1)
+      wrong: 0,
       clicks: 0
     };
 
-    let completedQuestions = new Set(); // preguntas ya completadas (cuando acierta por primera vez)
-    let wrongAttemptsByQ = {};          // { questionId: #intentosIncorrectosAntesDeAcertar }
-
-    function calcAccuracy() {
-      return stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0;
+    function calcScore10() {
+      if (!stats.total) return 0;
+      return Math.round(((stats.correct / stats.total) * 10) * 100) / 100; // 2 decimales
     }
 
     function updateScoreboard() {
       const el = document.getElementById('scoreboard');
       if (!el) return;
-      el.textContent = `Puntaje: ${stats.score} | Respondidas: ${stats.answered}`;
+      el.textContent = `Nota: ${calcScore10()}/10 | Correctas: ${stats.correct}/${stats.total} | Respondidas: ${stats.answered}`;
     }
 
     function updateScoreDetails() {
       const el = document.getElementById('score-details');
       if (!el) return;
-      el.textContent = `Aciertos: ${stats.correct} | Errores: ${stats.wrong} | %: ${calcAccuracy()}% | Clics: ${stats.clicks}`;
+      el.textContent = `Errores: ${stats.wrong} | Clics: ${stats.clicks}`;
     }
 
     async function logEvent(type, extra = {}) {
@@ -112,20 +111,20 @@
 
     async function saveVideoSummary() {
       if (!currentUser || !stats.videoId) return;
-
-      const accuracy = stats.answered ? (stats.correct / stats.answered) : 0;
-
+    
+      const score10 = calcScore10();
+    
       try {
         await setDoc(
           doc(db, 'users', currentUser.uid, 'videoAttempts', String(stats.videoId)),
           {
             videoId: stats.videoId,
-            score: stats.score,
+            score10,
+            total: stats.total,
             answered: stats.answered,
             correct: stats.correct,
             wrong: stats.wrong,
             clicks: stats.clicks,
-            accuracy,
             updatedAt: new Date().toISOString()
           },
           { merge: true }
@@ -192,64 +191,57 @@
         btn.textContent = opt;
 
         btn.addEventListener('click', async () => {
-          // ✅ (GRUPO 4) registrar clic/selección
+          // ✅ evitar doble click / reintentos
+          optsEl.querySelectorAll('button').forEach(b => b.disabled = true);
+        
           stats.clicks += 1;
-          updateScoreDetails();
-          await logEvent('select_option', { questionId: q.id, optionIndex: idx, timeInVideo: q.time });
-
+        
           const isCorrect = idx === q.correctIndex;
-
+        
+          // ✅ una pregunta = una respuesta (no hay reintento)
+          stats.answered += 1;
+        
           if (isCorrect) {
+            stats.correct += 1;
             fbEl.textContent = `✅ Correcto. ${q.explanation || ''}`;
             fbEl.className = "text-sm mt-3 text-green-300";
-            btnContinue.style.display = 'inline-flex';
-
-            // ✅ Solo contar si no estaba completada ya (evita doble conteo)
-            if (!completedQuestions.has(q.id)) {
-              completedQuestions.add(q.id);
-
-              const wrongAttempts = wrongAttemptsByQ[q.id] || 0;
-
-              stats.correct += 1;
-              stats.answered += 1;
-
-              // Puntaje: 1 punto por pregunta (pueden cambiarlo a 10 si quieren)
-              stats.score += 1;
-
-              updateScoreboard();
-              updateScoreDetails();
-
-              // guardar respuesta + resumen parcial
-              await saveAnswer({
-                videoId: stats.videoId,
-                questionId: q.id,
-                attemptsWrong: wrongAttempts,
-                timeInVideo: q.time
-              });
-
-              await saveVideoSummary();
-            }
           } else {
-            fbEl.textContent = "❌ Incorrecto. Intenta otra vez.";
-            fbEl.className = "text-sm mt-3 text-red-300";
-
             stats.wrong += 1;
-            wrongAttemptsByQ[q.id] = (wrongAttemptsByQ[q.id] || 0) + 1;
-
-            updateScoreDetails();
-            await logEvent('wrong_attempt', { questionId: q.id, timeInVideo: q.time });
-            await saveVideoSummary();
+            fbEl.textContent = `❌ Incorrecto. ${q.explanation || ''}`;
+            fbEl.className = "text-sm mt-3 text-red-300";
           }
+        
+          updateScoreboard();
+          updateScoreDetails();
+        
+          await logEvent('answer', {
+            questionId: q.id,
+            optionIndex: idx,
+            isCorrect,
+            timeInVideo: q.time
+          });
+        
+          // ✅ guarda respuesta (1 intento)
+          await addDoc(collection(db, 'users', currentUser.uid, 'answers'), {
+            videoId: stats.videoId,
+            questionId: q.id,
+            selectedIndex: idx,
+            isCorrect,
+            timeInVideo: q.time,
+            answeredAt: new Date().toISOString()
+          });
+        
+          await saveVideoSummary();
+        
+          // ✅ seguir automático (sin botón continuar)
+          setTimeout(async () => {
+            overlay.style.display = 'none';
+            try { ytPlayer.playVideo(); } catch {}
+          }, 700);
         });
 
         optsEl.appendChild(btn);
       });
-
-      btnContinue.onclick = async () => {
-        overlay.style.display = 'none';
-        await logEvent('continue', { questionId: q.id, timeInVideo: q.time });
-        try { ytPlayer.playVideo(); } catch {}
-      };
 
       overlay.style.display = 'flex';
     }
@@ -596,17 +588,17 @@
             // ✅ (GRUPO 4) reset de estadística por video
             stats = {
               videoId: Number(videoNum),
-              score: 0,
+              score10: 0,
+              total: currentQuestions.length, // ✅ total preguntas del video
               answered: 0,
               correct: 0,
               wrong: 0,
               clicks: 0
             };
-            completedQuestions = new Set();
-            wrongAttemptsByQ = {};
+            
             updateScoreboard();
             updateScoreDetails();
-            await logEvent('open_video', { videoId: stats.videoId });
+            await logEvent('open_video', { videoId: stats.videoId, totalQuestions: stats.total });
 
             // 2) Cargar YouTube API y crear/reusar player
             await loadYouTubeAPI();
@@ -637,6 +629,9 @@
                       await logEvent('ended', { videoId: stats.videoId });
                       stopQuizWatcher();
                       await saveVideoSummary();
+                    
+                      // ✅ mostrar nota final en pantalla
+                      showMessage('success', `Video finalizado. Nota final: ${calcScore10()}/10 (${stats.correct}/${stats.total} correctas)`);
                     }
                   }
                 }
