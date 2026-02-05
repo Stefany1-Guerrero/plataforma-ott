@@ -71,7 +71,7 @@
     function updateScoreboard() {
       const el = document.getElementById('scoreboard');
       if (!el) return;
-      el.textContent = `Nota: ${calcScore10()}/10 | Correctas: ${stats.correct}/${stats.total} | Respondidas: ${stats.answered}`;
+      el.textContent = `Nota: ${calcScore10()}/10 | Correctas: ${stats.correct}/${stats.total} | Incorrectas: ${stats.wrong}/${stats.total} | Respondidas: ${stats.answered}`;
     }
 
     function updateScoreDetails() {
@@ -191,14 +191,13 @@
         btn.textContent = opt;
 
         btn.addEventListener('click', async () => {
-          // ✅ evitar doble click / reintentos
+          // ✅ Bloquear reintentos
           optsEl.querySelectorAll('button').forEach(b => b.disabled = true);
         
+          // ✅ Contadores locales (no dependen de Firestore)
           stats.clicks += 1;
         
           const isCorrect = idx === q.correctIndex;
-        
-          // ✅ una pregunta = una respuesta (no hay reintento)
           stats.answered += 1;
         
           if (isCorrect) {
@@ -214,30 +213,37 @@
           updateScoreboard();
           updateScoreDetails();
         
-          await logEvent('answer', {
-            questionId: q.id,
-            optionIndex: idx,
-            isCorrect,
-            timeInVideo: q.time
-          });
-        
-          // ✅ guarda respuesta (1 intento)
-          await addDoc(collection(db, 'users', currentUser.uid, 'answers'), {
-            videoId: stats.videoId,
-            questionId: q.id,
-            selectedIndex: idx,
-            isCorrect,
-            timeInVideo: q.time,
-            answeredAt: new Date().toISOString()
-          });
-        
-          await saveVideoSummary();
-        
-          // ✅ seguir automático (sin botón continuar)
-          setTimeout(async () => {
-            overlay.style.display = 'none';
+          // ✅ IMPORTANTÍSIMO: programar el cierre ANTES de cualquier await
+          setTimeout(() => {
+            try { overlay.style.display = 'none'; } catch {}
             try { ytPlayer.playVideo(); } catch {}
           }, 700);
+        
+          // ✅ Guardado/registro: que NO rompa el flujo si falla
+          try {
+            // si no hay usuario, no intentes guardar
+            if (currentUser) {
+              await logEvent('answer', {
+                questionId: q.id,
+                optionIndex: idx,
+                isCorrect,
+                timeInVideo: q.time
+              });
+        
+              await addDoc(collection(db, 'users', currentUser.uid, 'answers'), {
+                videoId: stats.videoId,
+                questionId: q.id,
+                selectedIndex: idx,
+                isCorrect,
+                timeInVideo: q.time,
+                answeredAt: new Date().toISOString()
+              });
+        
+              await saveVideoSummary();
+            }
+          } catch (e) {
+            console.warn("Fallo guardando en Firestore, pero el video debe continuar:", e);
+          }
         });
 
         optsEl.appendChild(btn);
@@ -626,12 +632,9 @@
                       await logEvent('pause', { videoId: stats.videoId });
                     }
                     if (e.data === YT.PlayerState.ENDED) {
-                      await logEvent('ended', { videoId: stats.videoId });
                       stopQuizWatcher();
-                      await saveVideoSummary();
-                    
-                      // ✅ mostrar nota final en pantalla
-                      showMessage('success', `Video finalizado. Nota final: ${calcScore10()}/10 (${stats.correct}/${stats.total} correctas)`);
+                      try { await saveVideoSummary(); } catch {}
+                      showMessage('success', `Video finalizado. Nota final: ${calcScore10()}/10 (Correctas: ${stats.correct}/${stats.total})`);
                     }
                   }
                 }
