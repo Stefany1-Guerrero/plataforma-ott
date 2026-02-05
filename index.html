@@ -746,11 +746,17 @@
                     }
                     if (e.data === YT.PlayerState.ENDED) {
                       stopQuizWatcher();
-                      try { await saveVideoSummary(); } catch {}
                     
-                      await saveAttemptRollingFinal(); // ✅ guarda el resultado final en la tabla
+                      // ✅ guardar intento final
+                      await saveAttemptRollingFinal();
                     
-                      showMessage('success', `Video finalizado. Nota final: ${calcScore10()}/10 (Correctas: ${stats.correct}/${stats.total})`);
+                      // (opcional) guardar resumen
+                      await saveVideoSummary();
+                    
+                      showMessage(
+                        'success',
+                        `Video finalizado. Nota final: ${calcScore10()}/10 (Correctas: ${stats.correct}/${stats.total})`
+                      );
                     }
                   }
                 }
@@ -769,20 +775,22 @@
 
         document.getElementById('close-video').addEventListener('click', async () => {
           const videoPlayer = document.getElementById('video-player');
-
+        
           stopQuizWatcher();
-
+        
           const overlay = document.getElementById('quiz-overlay');
           if (overlay) overlay.style.display = 'none';
-
+        
           if (ytPlayer) {
             try { ytPlayer.stopVideo(); } catch {}
           }
-
-          // ✅ (GRUPO 4) guardar resumen final + evento
-          await logEvent('close_video', { videoId: stats.videoId });
+        
+          // ✅ GUARDAR INTENTO FINAL (AQUÍ ESTABA FALTANDO)
+          await saveAttemptRollingFinal();
+        
+          // (opcional, resumen general)
           await saveVideoSummary();
-
+        
           videoPlayer.style.display = 'none';
         });
 
