@@ -134,6 +134,82 @@
       }
     }
 
+    function formatDateShort(iso) {
+      try { return new Date(iso).toLocaleString(); } catch { return iso; }
+    }
+    
+    function renderAttemptsTable(attempts = []) {
+      const body = document.getElementById('attempts-body');
+      const meta = document.getElementById('attempts-meta');
+      if (!body) return;
+    
+      if (meta) meta.textContent = stats.videoId ? `Video ${stats.videoId}` : '';
+    
+      if (!attempts.length) {
+        body.innerHTML = `<tr><td class="py-2 text-gray-400" colspan="6">Aún no hay intentos guardados para este video.</td></tr>`;
+        return;
+      }
+    
+      body.innerHTML = attempts.map((a, i) => `
+        <tr class="border-t border-white/10">
+          <td class="py-2">${i + 1}</td>
+          <td class="py-2">${formatDateShort(a.at)}</td>
+          <td class="py-2 font-semibold">${a.score10}</td>
+          <td class="py-2">${a.correct}</td>
+          <td class="py-2">${a.wrong}</td>
+          <td class="py-2">${a.total}</td>
+        </tr>
+      `).join('');
+    }
+    
+    async function loadLastAttempts(videoId) {
+      if (!currentUser) { renderAttemptsTable([]); return; }
+      try {
+        const ref = doc(db, 'users', currentUser.uid, 'videoAttempts', String(videoId));
+        const snap = await getDoc(ref);
+        const data = snap.exists() ? snap.data() : null;
+        renderAttemptsTable(data?.lastAttempts || []);
+      } catch (e) {
+        console.warn("No se pudo cargar intentos:", e);
+        renderAttemptsTable([]);
+      }
+    }
+    
+    // ✅ Guardar intento FINAL (max 3) - NO toca tu scoreboard, es aparte
+    async function saveAttemptRollingFinal() {
+      if (!currentUser || !stats.videoId) return;
+    
+      const attempt = {
+        at: new Date().toISOString(),
+        score10: calcScore10(),
+        correct: stats.correct,
+        wrong: stats.wrong,
+        total: stats.total
+      };
+    
+      try {
+        const ref = doc(db, 'users', currentUser.uid, 'videoAttempts', String(stats.videoId));
+        const snap = await getDoc(ref);
+    
+        let lastAttempts = [];
+        if (snap.exists()) lastAttempts = snap.data().lastAttempts || [];
+    
+        // nuevo al inicio, mantener 3
+        lastAttempts = [attempt, ...lastAttempts].slice(0, 3);
+    
+        await setDoc(ref, {
+          videoId: stats.videoId,
+          lastAttempts,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+    
+        // refresca tabla en pantalla
+        renderAttemptsTable(lastAttempts);
+      } catch (e) {
+        console.warn("No se pudo guardar intento final:", e);
+      }
+    }
+    
     // ========= YouTube helpers =========
     function loadYouTubeAPI() {
       return new Promise((resolve) => {
@@ -528,6 +604,31 @@
                       <!-- ✅ (GRUPO 4) Marcador como el ejemplo -->
                       <div class="text-sm text-gray-200 mt-1" id="scoreboard">Puntaje: 0 | Respondidas: 0</div>
                       <div class="text-xs text-gray-300 mt-1" id="score-details">Aciertos: 0 | Errores: 0 | %: 0% | Clics: 0</div>
+                      <!-- ✅ Tabla aparte (últimos 3 intentos del video seleccionado) -->
+                      <div class="mt-4 bg-gray-900/30 border border-purple-500/20 rounded-xl p-4">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                          <h5 class="text-white font-semibold">📊 Últimos 3 intentos (video actual)</h5>
+                          <span class="text-xs text-gray-400" id="attempts-meta"></span>
+                        </div>
+                      
+                        <div class="overflow-x-auto">
+                          <table class="w-full text-sm text-gray-200">
+                            <thead class="text-xs text-gray-300">
+                              <tr>
+                                <th class="text-left py-2">#</th>
+                                <th class="text-left py-2">Fecha</th>
+                                <th class="text-left py-2">Nota /10</th>
+                                <th class="text-left py-2">Correctas</th>
+                                <th class="text-left py-2">Incorrectas</th>
+                                <th class="text-left py-2">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody id="attempts-body">
+                              <tr><td class="py-2 text-gray-400" colspan="6">Selecciona un video para ver intentos.</td></tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </div>
 
                     <button id="close-video" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-all">
@@ -606,6 +707,8 @@
             updateScoreDetails();
             await logEvent('open_video', { videoId: stats.videoId, totalQuestions: stats.total });
 
+            await loadLastAttempts(stats.videoId);
+
             // 2) Cargar YouTube API y crear/reusar player
             await loadYouTubeAPI();
 
@@ -634,6 +737,9 @@
                     if (e.data === YT.PlayerState.ENDED) {
                       stopQuizWatcher();
                       try { await saveVideoSummary(); } catch {}
+                    
+                      await saveAttemptRollingFinal(); // ✅ guarda el resultado final en la tabla
+                    
                       showMessage('success', `Video finalizado. Nota final: ${calcScore10()}/10 (Correctas: ${stats.correct}/${stats.total})`);
                     }
                   }
