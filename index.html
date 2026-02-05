@@ -162,6 +162,25 @@
         </tr>
       `).join('');
     }
+
+    function attemptsKey(videoId) {
+      return `attempts_${currentUser?.uid || 'anon'}_${videoId}`;
+    }
+    
+    function loadAttemptsLocal(videoId) {
+      try {
+        const raw = localStorage.getItem(attemptsKey(videoId));
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+    
+    function saveAttemptsLocal(videoId, attempts) {
+      try {
+        localStorage.setItem(attemptsKey(videoId), JSON.stringify(attempts));
+      } catch {}
+    }
     
     async function loadLastAttempts(videoId) {
       if (!currentUser) { renderAttemptsTable([]); return; }
@@ -212,10 +231,9 @@
     }
 
     async function finalizeAttempt(reason = 'close') {
-      // ✅ si no respondió nada, no guardes intento
+      if (!stats.videoId) return;
       if (stats.answered === 0) return;
     
-      // ✅ construye el intento final
       const attempt = {
         at: new Date().toISOString(),
         score10: calcScore10(),
@@ -224,17 +242,17 @@
         total: stats.total
       };
     
-      // 1) ✅ ACTUALIZA LA TABLA AL INSTANTE (sin Firestore)
-      attemptsBuffer = [attempt, ...attemptsBuffer].slice(0, 3);
-      renderAttemptsTable(attemptsBuffer);
+      // cargar intentos guardados
+      let attempts = loadAttemptsLocal(stats.videoId);
     
-      // 2) ✅ INTENTA GUARDAR EN FIRESTORE (para persistencia en otros dispositivos)
-      try {
-        await saveAttemptRollingFinal(); // guarda lastAttempts en Firestore
-        await saveVideoSummary();        // guarda resumen
-      } catch (e) {
-        console.warn("Firestore falló, pero la tabla ya se actualizó:", e);
-      }
+      // meter nuevo al inicio y mantener 3
+      attempts = [attempt, ...attempts].slice(0, 3);
+    
+      // guardar y renderizar
+      saveAttemptsLocal(stats.videoId, attempts);
+      renderAttemptsTable(attempts);
+    
+      console.log('✅ Intento guardado LOCAL:', reason, attempt);
     }
     
     // ========= YouTube helpers =========
@@ -741,14 +759,12 @@
               clicks: 0
             };
             
-            attemptsBuffer = [];
-            renderAttemptsTable([]);
+            const localAttempts = loadAttemptsLocal(stats.videoId);
+            renderAttemptsTable(localAttempts);
             
             updateScoreboard();
             updateScoreDetails();
             await logEvent('open_video', { videoId: stats.videoId, totalQuestions: stats.total });
-
-            await loadLastAttempts(stats.videoId);
 
             // 2) Cargar YouTube API y crear/reusar player
             await loadYouTubeAPI();
